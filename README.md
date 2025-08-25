@@ -127,13 +127,25 @@ FlockaのバックエンドAPI
 ### プロフィールカード管理 (`/cards`)
 
 #### `POST /cards/upload-url`
-画像アップロード用署名URL取得（要認証）
+画像アップロード用事前チェック（要認証）
 ```json
 {
   "fileName": "profile.jpg",
-  "fileSize": 1024000
+  "fileSize": 1024000,
+  "contentType": "image/jpeg"
 }
 ```
+
+#### `POST /cards/upload`
+画像ファイルを直接アップロード（要認証）
+- multipart/form-data形式
+- ファイルサイズ制限: 10MB
+- 対応形式: JPEG, PNG, GIF, WebP
+
+#### `GET /cards/image/*`
+アップロード済み画像を取得（公開）
+- 高速CDN配信
+- 1年間ブラウザキャッシュ
 
 #### `POST /cards`
 新しいカード作成（要認証）
@@ -237,3 +249,63 @@ src/
 3. **メール認証**: 24時間有効な認証トークン
 4. **場所情報**: 緯度・経度による正確な位置記録
 5. **R2連携**: 画像ファイルの安全な保存
+6. **画像処理**: 自動リサイズ・形式変換・CDN配信
+
+## セットアップ
+
+### 前提条件
+- Node.js 18以上
+- Cloudflareアカウント
+- Wrangler CLI
+
+### インストール
+
+1. **依存関係インストール**
+```bash
+npm install
+```
+
+2. **Cloudflareリソース作成**
+```bash
+# D1データベース作成
+wrangler d1 create flocka-db
+
+# R2バケット作成
+wrangler r2 bucket create flocka-storage
+```
+
+3. **データベーススキーマ適用**
+```bash
+npm run db:generate
+```
+
+4. **環境変数設定**
+`wrangler.toml`を編集して設定：
+- `JWT_SECRET`: JWT署名用秘密鍵
+- `MAILCHANNELS_API_KEY`: MailChannels APIキー
+
+5. **デプロイ**
+```bash
+npm run deploy
+```
+
+### ローカル開発
+
+```bash
+npm run dev
+```
+http://localhost:8787 でAPIが利用可能
+
+## デプロイ済みAPI
+
+- **URL**: https://flocka-api.kazu3jp-purin.workers.dev
+- **バージョン**: 1.0.0
+- **ステータス**: 🟢 運用中
+
+## ライセンス
+
+MIT License
+
+---
+
+*Flocka API v1.0.0 - デジタルプロフィールカード交換プラットフォーム*

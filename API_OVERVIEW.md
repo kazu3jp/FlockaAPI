@@ -85,7 +85,7 @@ exchanges {
 
 ### 基本情報
 
-- **ベースURL**: `https://api.flocka.net/`
+- **ベースURL**: `https://api.flocka.net`
 - **認証方式**: Bearer Token (JWT)
 - **レスポンス形式**: JSON
 
@@ -105,7 +105,9 @@ exchanges {
 
 | Method | Endpoint | 認証 | 説明 |
 |--------|----------|------|------|
-| `POST` | `/cards/upload-url` | ✅ | 画像アップロード用URL取得 |
+| `POST` | `/cards/upload-url` | ✅ | 画像アップロード用事前チェック |
+| `POST` | `/cards/upload` | ✅ | 画像ファイル直接アップロード |
+| `GET` | `/cards/image/*` | ❌ | 画像配信（CDN） |
 | `POST` | `/cards` | ✅ | 新規カード作成 |
 | `GET` | `/cards` | ✅ | 自分のカード一覧 |
 | `PUT` | `/cards/:id` | ✅ | カード情報更新 |
@@ -122,6 +124,30 @@ exchanges {
 | `DELETE` | `/exchanges/:id` | ✅ | コレクションから削除 |
 
 ### リクエスト・レスポンス例
+
+#### 画像アップロード `POST /cards/upload`
+
+**リクエスト:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "file=@profile.jpg" \
+  https://api.flocka.net/cards/upload
+```
+
+**レスポンス:**
+```json
+{
+  "success": true,
+  "data": {
+    "fileKey": "cards/user123/1692345678901-a1b2c3.jpg",
+    "originalName": "profile.jpg",
+    "size": 1024000,
+    "type": "image/jpeg",
+    "uploadedAt": "2025-08-26T10:30:00.000Z"
+  }
+}
+```
 
 #### カード交換 `POST /exchanges`
 
@@ -176,6 +202,7 @@ exchanges {
 - **Zodスキーマ**: 全エンドポイントで厳密な型検証
 - **SQLインジェクション対策**: パラメータ化クエリ
 - **XSS対策**: 入力サニタイゼーション
+- **ファイル検証**: 画像形式・サイズ・拡張子チェック
 
 ### アクセス制御
 
@@ -199,6 +226,7 @@ exchanges {
 | 項目 | 制限値 | 説明 |
 |------|-------|------|
 | **画像ファイルサイズ** | 10MB | プロフィール画像の最大サイズ |
+| **画像形式** | JPEG,PNG,GIF,WebP | 対応する画像フォーマット |
 | **API リクエストレート** | 1000/分 | IP単位の制限 |
 | **データベース** | D1標準制限 | 読み取り・書き込み操作 |
 | **ストレージ** | R2標準制限 | ファイル保存・配信 |
@@ -209,10 +237,11 @@ exchanges {
 
 ### 現在の運用状況
 
-- **デプロイURL**: `https://api.flocka.net/`
+- **デプロイURL**: `https://api.flocka.net`
 - **バージョン**: `v1.0.0`
 - **ステータス**: 🟢 運用中
-- **デプロイ日**: 2025年8月25日
+- **最終更新**: 2025年8月26日
+- **新機能**: 画像アップロード・配信機能追加
 
 ### 環境変数
 

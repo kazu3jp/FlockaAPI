@@ -71,6 +71,12 @@ export interface CreateCardRequest {
   }>;
 }
 
+export interface UploadUrlRequest {
+  fileName: string;
+  fileSize: number;
+  contentType?: string;
+}
+
 export interface UpdateCardRequest {
   card_name?: string;
   image_key?: string;
