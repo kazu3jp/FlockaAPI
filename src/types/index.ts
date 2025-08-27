@@ -101,6 +101,15 @@ export interface UpdateExchangeRequest {
   longitude?: number;
 }
 
+export interface MutualExchangeRequest {
+  exchangeToken: string;
+  myCardId: string;
+  memo?: string;
+  location_name?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
 export interface JWTPayload {
   userId: string;
   email: string;

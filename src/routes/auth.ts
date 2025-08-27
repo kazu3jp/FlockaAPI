@@ -55,7 +55,8 @@ auth.post('/register', async (c) => {
     const verificationToken = generateEmailVerificationToken(userId, c.env.JWT_SECRET);
 
     // 認証メールを送信
-    const emailSent = await sendVerificationEmail(email, verificationToken, c.env.MAILCHANNELS_API_KEY);
+    const baseUrl = 'https://api.flocka.net';
+    const emailSent = await sendVerificationEmail(email, verificationToken, c.env.MAILCHANNELS_API_KEY, baseUrl);
     if (!emailSent) {
       // メール送信に失敗してもユーザー作成は成功とする
       console.warn('Failed to send verification email to:', email);
@@ -270,6 +271,295 @@ auth.delete('/me', authMiddleware, async (c) => {
     return c.json({
       success: false,
       error: 'Failed to delete account',
+    }, 500);
+  }
+});
+
+/**
+ * GET /auth/verify
+ * メール認証ページ（ブラウザでアクセス）
+ */
+auth.get('/verify', async (c) => {
+  try {
+    const token = c.req.query('token');
+
+    if (!token) {
+      return c.html(`
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Flocka - メール認証エラー</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+            .error { color: #dc3545; }
+            .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">Flocka</div>
+            <h1 class="error">認証エラー</h1>
+            <p>認証トークンが見つかりません。メールのリンクを再度確認してください。</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // トークンを検証
+    const payload = verifyEmailVerificationToken(token, c.env.JWT_SECRET);
+    if (!payload) {
+      return c.html(`
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Flocka - メール認証エラー</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+            .error { color: #dc3545; }
+            .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">Flocka</div>
+            <h1 class="error">認証エラー</h1>
+            <p>認証トークンが無効または期限切れです。新しい認証メールをリクエストしてください。</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // ユーザーのemail_verifiedフラグを更新
+    const result = await c.env.DB.prepare(
+      'UPDATE users SET email_verified = 1 WHERE id = ?'
+    ).bind(payload.userId).run();
+
+    if (result.meta && result.meta.changes === 0) {
+      return c.html(`
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Flocka - ユーザーが見つかりません</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+            .error { color: #dc3545; }
+            .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">Flocka</div>
+            <h1 class="error">エラー</h1>
+            <p>ユーザーが見つかりません。</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // 成功ページを表示
+    return c.html(`
+      <!DOCTYPE html>
+      <html lang="ja">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Flocka - メール認証完了</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+          .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+          .success { color: #28a745; }
+          .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          .btn { display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 20px 10px; }
+          .btn:hover { background: #0056b3; }
+          .btn.secondary { background: #6c757d; }
+          .btn.secondary:hover { background: #545b62; }
+          .note { font-size: 14px; color: #666; margin-top: 20px; }
+          .auto-redirect { font-size: 12px; color: #888; margin-top: 15px; }
+        </style>
+        <script>
+          // 3秒後に自動的にアプリを開く
+          setTimeout(function() {
+            detectPlatformAndRedirect();
+          }, 3000);
+          
+          // より確実なアプリ起動とフォールバック処理
+          function detectPlatformAndRedirect() {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            const startTime = Date.now();
+            
+            // ページがバックグラウンドに移動したかを検出
+            let hasBlurred = false;
+            
+            function onBlur() {
+              hasBlurred = true;
+            }
+            
+            function onFocus() {
+              // ページに戻ってきた場合の処理
+            }
+            
+            window.addEventListener('blur', onBlur);
+            window.addEventListener('focus', onFocus);
+            window.addEventListener('pagehide', onBlur);
+            
+            // iOS
+            if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+              // iframeを使った確実な検出
+              const iframe = document.createElement('iframe');
+              iframe.style.display = 'none';
+              iframe.src = 'flockaapp://auth/verified';
+              document.body.appendChild(iframe);
+              
+              setTimeout(function() {
+                document.body.removeChild(iframe);
+                if (!hasBlurred) {
+                  // アプリが開かなかった場合
+                  window.location.href = 'https://flocka.net';
+                }
+              }, 2000);
+            }
+            // Android
+            else if (/android/i.test(userAgent)) {
+              // Android Intent
+              window.location.href = 'intent://auth/verified#Intent;scheme=flockaapp;package=com.flocka.app;S.browser_fallback_url=https%3A//flocka.net;end';
+            }
+            // デスクトップ・その他
+            else {
+              // デスクトップではアプリがないことが多いので、短いタイムアウト
+              try {
+                window.location.href = 'flockaapp://auth/verified';
+              } catch (e) {
+                // エラーが発生した場合は直接flocka.netに
+                window.location.href = 'https://flocka.net';
+                return;
+              }
+              
+              // 500ms後にflocka.netにフォールバック
+              setTimeout(function() {
+                if (!hasBlurred) {
+                  window.location.href = 'https://flocka.net';
+                }
+              }, 500);
+            }
+            
+            // クリーンアップ用のタイムアウト
+            setTimeout(function() {
+              window.removeEventListener('blur', onBlur);
+              window.removeEventListener('focus', onFocus);
+              window.removeEventListener('pagehide', onBlur);
+            }, 5000);
+          }
+        </script>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">Flocka</div>
+          <h1 class="success">✅ メール認証完了！</h1>
+          <p>メールアドレスの認証が正常に完了しました。</p>
+          <p>これでFlockaアプリにログインできます。</p>
+          
+          <div class="auto-redirect">
+            <strong>3秒後に自動的にアプリを起動します...</strong><br>
+            <small>アプリがない場合はflocka.netに移動します</small>
+          </div>
+          
+          <a href="flockaapp://auth/verified" class="btn" onclick="detectPlatformAndRedirect(); return false;">
+            📱 アプリを開く
+          </a>
+          
+          <a href="https://flocka.net" class="btn secondary">
+            🌐 flocka.netに移動
+          </a>
+          
+          <div class="note">
+            <strong>アプリが見つからない場合：</strong><br>
+            • 自動的にflocka.netウェブサイトに移動します<br>
+            • そこからアプリをダウンロードできます
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Email verification error:', error);
+    return c.html(`
+      <!DOCTYPE html>
+      <html lang="ja">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Flocka - エラー</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+          .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+          .error { color: #dc3545; }
+          .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">Flocka</div>
+          <h1 class="error">エラーが発生しました</h1>
+          <p>メール認証の処理中にエラーが発生しました。しばらく時間をおいて再度お試しください。</p>
+        </div>
+      </body>
+      </html>
+    `, 500);
+  }
+});
+
+/**
+ * GET /auth/verify-status/:userId
+ * メール認証状態の確認（アプリ用）
+ */
+auth.get('/verify-status/:userId', async (c) => {
+  try {
+    const userId = c.req.param('userId');
+
+    if (!userId) {
+      return c.json({
+        success: false,
+        error: 'User ID is required',
+      }, 400);
+    }
+
+    // ユーザーの認証状態を確認
+    const user = await c.env.DB.prepare(
+      'SELECT id, email, email_verified FROM users WHERE id = ?'
+    ).bind(userId).first() as User | null;
+
+    if (!user) {
+      return c.json({
+        success: false,
+        error: 'User not found',
+      }, 404);
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        userId: user.id,
+        email: user.email,
+        emailVerified: Boolean(user.email_verified),
+      },
+    });
+  } catch (error) {
+    console.error('Verify status check error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to check verification status',
     }, 500);
   }
 });

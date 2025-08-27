@@ -356,4 +356,220 @@ exchanges.get('/:id', authMiddleware, async (c) => {
   }
 });
 
+/**
+ * POST /exchanges/mutual
+ * URLトークンを使った相互カード交換（要認証）
+ */
+exchanges.post('/mutual', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const body = await c.req.json();
+    const { exchangeToken, myCardId, memo, location_name, latitude, longitude } = body;
+
+    // バリデーション
+    if (!exchangeToken || !myCardId) {
+      return c.json({
+        success: false,
+        error: 'Exchange token and your card ID are required',
+      }, 400);
+    }
+
+    // 交換トークンをデコード
+    let tokenData;
+    try {
+      tokenData = JSON.parse(atob(exchangeToken));
+    } catch (e) {
+      return c.json({
+        success: false,
+        error: 'Invalid exchange token',
+      }, 400);
+    }
+
+    // トークン有効期限チェック
+    if (Date.now() > tokenData.expires) {
+      return c.json({
+        success: false,
+        error: 'Exchange token has expired',
+      }, 400);
+    }
+
+    // 相手のカード情報を取得
+    const otherCard = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ?'
+    ).bind(tokenData.cardId).first() as Card | null;
+
+    if (!otherCard) {
+      return c.json({
+        success: false,
+        error: 'Target card not found',
+      }, 404);
+    }
+
+    // 自分のカード情報を取得
+    const myCard = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ? AND user_id = ?'
+    ).bind(myCardId, currentUser.userId).first() as Card | null;
+
+    if (!myCard) {
+      return c.json({
+        success: false,
+        error: 'Your card not found or not owned by you',
+      }, 404);
+    }
+
+    // 同じユーザー同士の交換を防ぐ
+    if (otherCard.user_id === currentUser.userId) {
+      return c.json({
+        success: false,
+        error: 'Cannot exchange cards with yourself',
+      }, 400);
+    }
+
+    // 既に相互交換済みかチェック
+    const existingExchange1 = await c.env.DB.prepare(
+      'SELECT id FROM exchanges WHERE owner_user_id = ? AND collected_card_id = ?'
+    ).bind(currentUser.userId, otherCard.id).first();
+
+    const existingExchange2 = await c.env.DB.prepare(
+      'SELECT id FROM exchanges WHERE owner_user_id = ? AND collected_card_id = ?'
+    ).bind(otherCard.user_id, myCard.id).first();
+
+    if (existingExchange1 || existingExchange2) {
+      return c.json({
+        success: false,
+        error: 'Cards have already been exchanged between these users',
+      }, 409);
+    }
+
+    // トランザクション開始（相互交換）
+    const exchangeId1 = crypto.randomUUID();
+    const exchangeId2 = crypto.randomUUID();
+
+    // 現在のユーザーが相手のカードをコレクション
+    await c.env.DB.prepare(
+      'INSERT INTO exchanges (id, owner_user_id, collected_card_id, memo, location_name, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      exchangeId1,
+      currentUser.userId,
+      otherCard.id,
+      memo || `URL交換で ${otherCard.card_name} を取得`,
+      location_name,
+      latitude,
+      longitude
+    ).run();
+
+    // 相手のユーザーが現在のユーザーのカードをコレクション
+    await c.env.DB.prepare(
+      'INSERT INTO exchanges (id, owner_user_id, collected_card_id, memo, location_name, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      exchangeId2,
+      otherCard.user_id,
+      myCard.id,
+      `URL交換で ${myCard.card_name} を取得`,
+      location_name,
+      latitude,
+      longitude
+    ).run();
+
+    return c.json({
+      success: true,
+      message: 'Cards exchanged successfully',
+      data: {
+        exchange1: {
+          id: exchangeId1,
+          collectorUserId: currentUser.userId,
+          collectedCard: {
+            id: otherCard.id,
+            name: otherCard.card_name,
+          },
+        },
+        exchange2: {
+          id: exchangeId2,
+          collectorUserId: otherCard.user_id,
+          collectedCard: {
+            id: myCard.id,
+            name: myCard.card_name,
+          },
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Mutual exchange error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to exchange cards',
+    }, 500);
+  }
+});
+
+/**
+ * GET /exchanges/token-info
+ * 交換トークンの情報を取得（要認証）
+ */
+exchanges.get('/token-info', authMiddleware, async (c) => {
+  try {
+    const token = c.req.query('token');
+
+    if (!token) {
+      return c.json({
+        success: false,
+        error: 'Token is required',
+      }, 400);
+    }
+
+    // トークンをデコード
+    let tokenData;
+    try {
+      tokenData = JSON.parse(atob(token));
+    } catch (e) {
+      return c.json({
+        success: false,
+        error: 'Invalid token',
+      }, 400);
+    }
+
+    // トークン有効期限チェック
+    if (Date.now() > tokenData.expires) {
+      return c.json({
+        success: false,
+        error: 'Token has expired',
+      }, 400);
+    }
+
+    // カード情報を取得
+    const card = await c.env.DB.prepare(
+      'SELECT c.id, c.card_name, c.image_key, u.name as owner_name, u.id as owner_id FROM cards c JOIN users u ON c.user_id = u.id WHERE c.id = ?'
+    ).bind(tokenData.cardId).first() as any;
+
+    if (!card) {
+      return c.json({
+        success: false,
+        error: 'Card not found',
+      }, 404);
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        card: {
+          id: card.id,
+          name: card.card_name,
+          imageKey: card.image_key,
+          owner: {
+            id: card.owner_id,
+            name: card.owner_name,
+          },
+        },
+        expiresAt: new Date(tokenData.expires).toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('Token info error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to get token info',
+    }, 500);
+  }
+});
+
 export default exchanges;

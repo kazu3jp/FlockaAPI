@@ -52,7 +52,7 @@ export async function sendEmail(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'X-Api-Key': apiKey,
       },
       body: JSON.stringify(emailData),
     });
@@ -144,7 +144,7 @@ export async function sendVerificationEmail(
   email: string,
   verificationToken: string,
   apiKey: string,
-  baseUrl: string = 'https://flocka.net'
+  baseUrl: string = 'https://api.flocka.net'
 ): Promise<boolean> {
   const verificationUrl = `${baseUrl}/auth/verify?token=${verificationToken}`;
   const subject = 'Flocka - メールアドレスの確認';

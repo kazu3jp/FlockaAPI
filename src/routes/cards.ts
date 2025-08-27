@@ -439,4 +439,276 @@ cards.delete('/:id', authMiddleware, async (c) => {
   }
 });
 
+/**
+ * POST /cards/:id/generate-exchange-url
+ * カード交換用のURLを生成（要認証）
+ */
+cards.post('/:id/generate-exchange-url', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const cardId = c.req.param('id');
+
+    // カードの存在確認と所有者チェック
+    const card = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ? AND user_id = ?'
+    ).bind(cardId, currentUser.userId).first() as Card | null;
+
+    if (!card) {
+      return c.json({
+        success: false,
+        error: 'Card not found or not owned by you',
+      }, 404);
+    }
+
+    // 交換用トークンを生成（24時間有効）
+    const exchangeToken = btoa(JSON.stringify({
+      cardId: card.id,
+      userId: currentUser.userId,
+      timestamp: Date.now(),
+      expires: Date.now() + (24 * 60 * 60 * 1000) // 24時間
+    }));
+
+    // 交換URL生成
+    const exchangeUrl = `https://api.flocka.net/cards/exchange?token=${exchangeToken}`;
+
+    return c.json({
+      success: true,
+      data: {
+        exchangeUrl,
+        cardId: card.id,
+        cardName: card.card_name,
+        expiresAt: new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('Generate exchange URL error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to generate exchange URL',
+    }, 500);
+  }
+});
+
+/**
+ * GET /cards/exchange
+ * 交換用URLにアクセスした時の処理（ブラウザでアクセス）
+ */
+cards.get('/exchange', async (c) => {
+  try {
+    const token = c.req.query('token');
+
+    if (!token) {
+      return c.html(`
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Flocka - カード交換エラー</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+            .error { color: #dc3545; }
+            .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">Flocka</div>
+            <h1 class="error">交換エラー</h1>
+            <p>無効な交換URLです。正しいリンクを確認してください。</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // トークンをデコード
+    let tokenData;
+    try {
+      tokenData = JSON.parse(atob(token));
+    } catch (e) {
+      return c.html(`
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Flocka - 無効なトークン</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+            .error { color: #dc3545; }
+            .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">Flocka</div>
+            <h1 class="error">無効なトークン</h1>
+            <p>交換トークンが無効です。新しい交換URLを取得してください。</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // トークン有効期限チェック
+    if (Date.now() > tokenData.expires) {
+      return c.html(`
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Flocka - 期限切れ</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+            .error { color: #dc3545; }
+            .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">Flocka</div>
+            <h1 class="error">期限切れ</h1>
+            <p>この交換URLは期限切れです。新しい交換URLを取得してください。</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // カード情報を取得
+    const card = await c.env.DB.prepare(
+      'SELECT c.id, c.card_name, c.image_key, u.name as owner_name FROM cards c JOIN users u ON c.user_id = u.id WHERE c.id = ?'
+    ).bind(tokenData.cardId).first() as any;
+
+    if (!card) {
+      return c.html(`
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Flocka - カードが見つかりません</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+            .error { color: #dc3545; }
+            .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">Flocka</div>
+            <h1 class="error">カードが見つかりません</h1>
+            <p>指定されたカードは削除されているか存在しません。</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // カード交換ページを表示
+    return c.html(`
+      <!DOCTYPE html>
+      <html lang="ja">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Flocka - カード交換</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+          .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+          .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+          .card-preview { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
+          .card-name { font-size: 1.5em; font-weight: bold; color: #333; margin-bottom: 10px; }
+          .owner-name { color: #666; margin-bottom: 20px; }
+          .btn { display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 10px; cursor: pointer; border: none; font-size: 16px; }
+          .btn:hover { background: #0056b3; }
+          .btn.secondary { background: #6c757d; }
+          .btn.secondary:hover { background: #545b62; }
+          .note { font-size: 14px; color: #666; margin-top: 20px; }
+        </style>
+        <script>
+          function openApp() {
+            const token = '${token}';
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            
+            // iOS
+            if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+              window.location.href = 'flockaapp://exchange?token=' + encodeURIComponent(token);
+              setTimeout(function() {
+                window.location.href = 'https://flocka.net';
+              }, 1500);
+            }
+            // Android
+            else if (/android/i.test(userAgent)) {
+              window.location.href = 'intent://exchange?token=' + encodeURIComponent(token) + '#Intent;scheme=flockaapp;package=com.flocka.app;S.browser_fallback_url=https%3A//flocka.net;end';
+            }
+            // その他
+            else {
+              window.location.href = 'https://flocka.net';
+            }
+          }
+        </script>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">Flocka</div>
+          <h1>🎴 カード交換</h1>
+          
+          <div class="card-preview">
+            <div class="card-name">${card.card_name}</div>
+            <div class="owner-name">by ${card.owner_name}</div>
+          </div>
+          
+          <p>このカードと交換しますか？</p>
+          
+          <button class="btn" onclick="openApp()">
+            📱 アプリで交換する
+          </button>
+          
+          <a href="https://flocka.net" class="btn secondary">
+            🌐 flocka.netに移動
+          </a>
+          
+          <div class="note">
+            ※ カード交換はFlockaアプリで行います<br>
+            ※ 交換後はお互いのカードがコレクションに追加されます
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Exchange page error:', error);
+    return c.html(`
+      <!DOCTYPE html>
+      <html lang="ja">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Flocka - エラー</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+          .container { max-width: 600px; margin: 50px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+          .error { color: #dc3545; }
+          .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">Flocka</div>
+          <h1 class="error">エラーが発生しました</h1>
+          <p>カード交換の処理中にエラーが発生しました。しばらく時間をおいて再度お試しください。</p>
+        </div>
+      </body>
+      </html>
+    `, 500);
+  }
+});
+
 export default cards;
