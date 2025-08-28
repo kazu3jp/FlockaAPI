@@ -283,22 +283,16 @@ exchanges.post('/qr', authMiddleware, async (c) => {
     }
 
     // QRデータからトークンとカードIDを抽出
-    let token: string;
-    let cardId: string;
+  let token: string;
+  let cardId: string | null = null;
     
     try {
       console.log('Parsing QR data:', qrData);
-      // qrDataが直接トークンの場合
+      // qrDataが直接トークンの場合（BLEなど）
       if (typeof qrData === 'string' && !qrData.startsWith('{')) {
         token = qrData;
-        console.log('QR data is direct token');
-        // トークンをデコードしてカードIDを取得
-        const tokenData = JSON.parse(atob(token));
-        cardId = tokenData.cardId;
-        console.log('Decoded token data:', tokenData);
-      }
-      // qrDataがJSONの場合
-      else {
+        console.log('QR data is direct token (opaque)');
+      } else {
         console.log('QR data is JSON format, parsing with parseCardExchangeQRData');
         const qrContent = parseCardExchangeQRData(qrData);
         if (!qrContent) {
@@ -320,7 +314,7 @@ exchanges.post('/qr', authMiddleware, async (c) => {
       }, 400);
     }
 
-    console.log('Extracted token and cardId:', { token, cardId });
+  console.log('Extracted token and cardId (pre-validate):', { token, cardId });
 
     // QRコードトークンの有効性をチェック
     console.log('Checking QR token validity');
@@ -337,7 +331,20 @@ exchanges.post('/qr', authMiddleware, async (c) => {
     }
     console.log('QR token is valid:', qrToken);
 
+    // 直接トークンのみを受け取った場合（BLEなど）、DBのトークン行からcardIdを補完
+    try {
+  if (!cardId && qrToken && (qrToken as any).card_id) {
+        cardId = (qrToken as any).card_id as string;
+        console.log('cardId derived from qrToken.card_id:', cardId);
+      }
+    } catch (e) {
+      console.warn('Failed to derive cardId from qrToken:', e);
+    }
+
     // 相手のカード情報を取得
+    if (!cardId) {
+      return c.json({ success: false, error: 'Card ID could not be determined from token' }, 400);
+    }
     console.log('Fetching target card:', cardId);
     const otherCard = await c.env.DB.prepare(
       'SELECT * FROM cards WHERE id = ?'
