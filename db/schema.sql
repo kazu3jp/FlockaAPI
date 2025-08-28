@@ -64,6 +64,25 @@ CREATE TABLE IF NOT EXISTS qr_exchange_tokens (
     FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
 );
 
+-- QR即時交換ログテーブル（交換履歴とリアルタイム通知用）
+CREATE TABLE IF NOT EXISTS qr_exchange_logs (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    qr_owner_user_id TEXT NOT NULL, -- QRコード生成者（読み込まれた側）
+    scanner_user_id TEXT NOT NULL, -- QRコード読み込み者
+    scanner_card_id TEXT NOT NULL, -- 読み込み者が選択したカード
+    qr_card_id TEXT NOT NULL, -- QRコードのカード
+    memo TEXT, -- 読み込み者からのメモ
+    location_name TEXT, -- 交換場所
+    latitude REAL, -- 緯度
+    longitude REAL, -- 経度
+    notified INTEGER DEFAULT 0 CHECK (notified IN (0, 1)), -- QR生成者への通知フラグ
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (qr_owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (scanner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (scanner_card_id) REFERENCES cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (qr_card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+
 -- インデックスの作成
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_cards_user_id ON cards(user_id);
@@ -74,3 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_exchange_requests_to_user ON exchange_requests(to
 CREATE INDEX IF NOT EXISTS idx_exchange_requests_from_user ON exchange_requests(from_user_id);
 CREATE INDEX IF NOT EXISTS idx_exchange_requests_status ON exchange_requests(status);
 CREATE INDEX IF NOT EXISTS idx_qr_tokens_expires ON qr_exchange_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_qr_logs_owner ON qr_exchange_logs(qr_owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_qr_logs_scanner ON qr_exchange_logs(scanner_user_id);
+CREATE INDEX IF NOT EXISTS idx_qr_logs_notified ON qr_exchange_logs(notified);
+CREATE INDEX IF NOT EXISTS idx_qr_logs_created ON qr_exchange_logs(created_at);

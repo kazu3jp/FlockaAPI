@@ -47,6 +47,20 @@ export interface Exchange {
   created_at: string;
 }
 
+export interface QRExchangeLog {
+  id: string;
+  qr_owner_user_id: string;
+  scanner_user_id: string;
+  scanner_card_id: string;
+  qr_card_id: string;
+  memo?: string;
+  location_name?: string;
+  latitude?: number;
+  longitude?: number;
+  notified: number;
+  created_at: string;
+}
+
 // APIリクエスト/レスポンスの型定義
 export interface RegisterRequest {
   email: string;
