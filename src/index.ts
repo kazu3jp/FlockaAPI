@@ -3,6 +3,7 @@ import { corsMiddleware, errorMiddleware, loggerMiddleware } from './middleware/
 import authRoutes from './routes/auth';
 import cardRoutes from './routes/cards';
 import exchangeRoutes from './routes/exchanges';
+import cleanupRoutes from './routes/cleanup';
 import type { HonoEnv } from './types';
 
 // Honoアプリケーションの初期化
@@ -18,6 +19,7 @@ app.route('/auth', authRoutes);
 app.route('/users', authRoutes); // /users/me エンドポイント用
 app.route('/cards', cardRoutes);
 app.route('/exchanges', exchangeRoutes);
+app.route('/cleanup', cleanupRoutes);
 
 // ヘルスチェック用エンドポイント
 app.get('/', (c) => {

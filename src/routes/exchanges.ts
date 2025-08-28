@@ -1,6 +1,20 @@
 import { Hono } from 'hono';
 import { authMiddleware, getCurrentUser } from '../middleware/auth';
-import type { HonoEnv, CreateExchangeRequest, UpdateExchangeRequest, Exchange, Card, User } from '../types';
+import type { 
+  HonoEnv, 
+  CreateExchangeRequest, 
+  UpdateExchangeRequest, 
+  QRExchangeRequest,
+  SendExchangeRequestParams,
+  Exchange, 
+  Card, 
+  User 
+} from '../types';
+import { 
+  parseCardExchangeQRData,
+  validateMemo,
+  validateCoordinates
+} from '../utils';
 
 const exchanges = new Hono<HonoEnv>();
 
@@ -53,15 +67,6 @@ exchanges.post('/', authMiddleware, async (c) => {
         success: false,
         error: 'You have already collected this card',
       }, 409);
-    }
-
-    // 位置情報のバリデーション
-    if ((latitude !== undefined || longitude !== undefined) && 
-        (latitude === undefined || longitude === undefined)) {
-      return c.json({
-        success: false,
-        error: 'Both latitude and longitude must be provided together',
-      }, 400);
     }
 
     // 交換記録をデータベースに保存
@@ -184,15 +189,6 @@ exchanges.put('/:id', authMiddleware, async (c) => {
         success: false,
         error: 'You are not authorized to update this exchange',
       }, 403);
-    }
-
-    // 位置情報のバリデーション
-    if ((latitude !== undefined || longitude !== undefined) && 
-        (latitude === undefined || longitude === undefined)) {
-      return c.json({
-        success: false,
-        error: 'Both latitude and longitude must be provided together',
-      }, 400);
     }
 
     // 更新フィールドを準備
@@ -568,6 +564,450 @@ exchanges.get('/token-info', authMiddleware, async (c) => {
     return c.json({
       success: false,
       error: 'Failed to get token info',
+    }, 500);
+  }
+});
+
+/**
+ * POST /exchanges/qr
+ * QRコードスキャンによるカード交換（要認証）
+ */
+exchanges.post('/qr', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const body: QRExchangeRequest = await c.req.json();
+    const { qrData, myCardId, memo, location_name, latitude, longitude } = body;
+
+    // バリデーション
+    if (!qrData || !myCardId) {
+      return c.json({
+        success: false,
+        error: 'QR data and your card ID are required',
+      }, 400);
+    }
+
+    // QRデータを解析
+    const qrContent = parseCardExchangeQRData(qrData);
+    if (!qrContent) {
+      return c.json({
+        success: false,
+        error: 'Invalid or expired QR code',
+      }, 400);
+    }
+
+    // QRコードトークンの有効性をチェック
+    const qrToken = await c.env.DB.prepare(
+      'SELECT * FROM qr_exchange_tokens WHERE token = ? AND expires_at > datetime("now")'
+    ).bind(qrContent.token).first();
+
+    if (!qrToken) {
+      return c.json({
+        success: false,
+        error: 'QR code token is invalid or expired',
+      }, 400);
+    }
+
+    // 相手のカード情報を取得
+    const otherCard = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ?'
+    ).bind(qrContent.cardId).first() as Card | null;
+
+    if (!otherCard) {
+      return c.json({
+        success: false,
+        error: 'Target card not found',
+      }, 404);
+    }
+
+    // 自分のカード情報を取得
+    const myCard = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ? AND user_id = ?'
+    ).bind(myCardId, currentUser.userId).first() as Card | null;
+
+    if (!myCard) {
+      return c.json({
+        success: false,
+        error: 'Your card not found or not owned by you',
+      }, 404);
+    }
+
+    // 同じユーザー同士の交換を防ぐ
+    if (otherCard.user_id === currentUser.userId) {
+      return c.json({
+        success: false,
+        error: 'Cannot exchange cards with yourself',
+      }, 400);
+    }
+
+    // 既に相互交換済みかチェック
+    const existingExchange1 = await c.env.DB.prepare(
+      'SELECT id FROM exchanges WHERE owner_user_id = ? AND collected_card_id = ?'
+    ).bind(currentUser.userId, otherCard.id).first();
+
+    const existingExchange2 = await c.env.DB.prepare(
+      'SELECT id FROM exchanges WHERE owner_user_id = ? AND collected_card_id = ?'
+    ).bind(otherCard.user_id, myCard.id).first();
+
+    if (existingExchange1 || existingExchange2) {
+      return c.json({
+        success: false,
+        error: 'Cards have already been exchanged between these users',
+      }, 409);
+    }
+
+    // 相互交換を実行
+    const exchangeId1 = crypto.randomUUID();
+    const exchangeId2 = crypto.randomUUID();
+
+    // 現在のユーザーが相手のカードをコレクション
+    await c.env.DB.prepare(
+      'INSERT INTO exchanges (id, owner_user_id, collected_card_id, memo, location_name, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      exchangeId1,
+      currentUser.userId,
+      otherCard.id,
+      memo || `QR交換で ${otherCard.card_name} を取得`,
+      location_name,
+      latitude,
+      longitude
+    ).run();
+
+    // 相手のユーザーが現在のユーザーのカードをコレクション
+    await c.env.DB.prepare(
+      'INSERT INTO exchanges (id, owner_user_id, collected_card_id, memo, location_name, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      exchangeId2,
+      otherCard.user_id,
+      myCard.id,
+      `QR交換で ${myCard.card_name} を取得`,
+      location_name,
+      latitude,
+      longitude
+    ).run();
+
+    // 使用済みトークンを削除
+    await c.env.DB.prepare(
+      'DELETE FROM qr_exchange_tokens WHERE token = ?'
+    ).bind(qrContent.token).run();
+
+    return c.json({
+      success: true,
+      message: 'Cards exchanged successfully via QR code',
+      data: {
+        exchange1: {
+          id: exchangeId1,
+          collectorUserId: currentUser.userId,
+          collectedCard: {
+            id: otherCard.id,
+            name: otherCard.card_name,
+          },
+        },
+        exchange2: {
+          id: exchangeId2,
+          collectorUserId: otherCard.user_id,
+          collectedCard: {
+            id: myCard.id,
+            name: myCard.card_name,
+          },
+        },
+      },
+    });
+  } catch (error) {
+    console.error('QR exchange error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to exchange cards via QR code',
+    }, 500);
+  }
+});
+
+/**
+ * POST /exchanges/request
+ * 交換リクエストを送信（近距離交換用）（要認証）
+ */
+exchanges.post('/request', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const body: SendExchangeRequestParams = await c.req.json();
+    const { targetUserId, cardId, message } = body;
+
+    // バリデーション
+    if (!targetUserId || !cardId) {
+      return c.json({
+        success: false,
+        error: 'Target user ID and card ID are required',
+      }, 400);
+    }
+
+    // 自分自身にリクエストを送ることを防ぐ
+    if (targetUserId === currentUser.userId) {
+      return c.json({
+        success: false,
+        error: 'Cannot send exchange request to yourself',
+      }, 400);
+    }
+
+    // カードの存在確認と所有者チェック
+    const card = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ? AND user_id = ?'
+    ).bind(cardId, currentUser.userId).first() as Card | null;
+
+    if (!card) {
+      return c.json({
+        success: false,
+        error: 'Card not found or not owned by you',
+      }, 404);
+    }
+
+    // ターゲットユーザーの存在確認
+    const targetUser = await c.env.DB.prepare(
+      'SELECT id, name FROM users WHERE id = ?'
+    ).bind(targetUserId).first() as User | null;
+
+    if (!targetUser) {
+      return c.json({
+        success: false,
+        error: 'Target user not found',
+      }, 404);
+    }
+
+    // 既存の pending リクエストをチェック
+    const existingRequest = await c.env.DB.prepare(
+      'SELECT id FROM exchange_requests WHERE from_user_id = ? AND to_user_id = ? AND status = "pending" AND expires_at > datetime("now")'
+    ).bind(currentUser.userId, targetUserId).first();
+
+    if (existingRequest) {
+      return c.json({
+        success: false,
+        error: 'You already have a pending exchange request with this user',
+      }, 409);
+    }
+
+    // 交換リクエストを作成
+    const requestId = crypto.randomUUID();
+    await c.env.DB.prepare(
+      'INSERT INTO exchange_requests (id, from_user_id, to_user_id, card_id, message, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, "pending", datetime("now"), datetime("now", "+30 minutes"))'
+    ).bind(requestId, currentUser.userId, targetUserId, cardId, message).run();
+
+    return c.json({
+      success: true,
+      message: 'Exchange request sent successfully',
+      data: {
+        requestId,
+        targetUser: {
+          id: targetUser.id,
+          name: targetUser.name,
+        },
+        card: {
+          id: card.id,
+          name: card.card_name,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Send exchange request error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to send exchange request',
+    }, 500);
+  }
+});
+
+/**
+ * GET /exchanges/requests
+ * 受信した交換リクエストを取得（要認証）
+ */
+exchanges.get('/requests', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+
+    // 受信した交換リクエストを取得
+    const requestsResult = await c.env.DB.prepare(`
+      SELECT 
+        er.id,
+        er.from_user_id,
+        er.card_id,
+        er.message,
+        er.status,
+        er.created_at,
+        er.expires_at,
+        u.name as from_user_name,
+        c.card_name
+      FROM exchange_requests er
+      JOIN users u ON er.from_user_id = u.id
+      JOIN cards c ON er.card_id = c.id
+      WHERE er.to_user_id = ?
+        AND er.status = 'pending'
+        AND er.expires_at > datetime('now')
+      ORDER BY er.created_at DESC
+    `).bind(currentUser.userId).all();
+
+    const requests = requestsResult.results.map((request: any) => ({
+      id: request.id,
+      fromUser: {
+        id: request.from_user_id,
+        name: request.from_user_name,
+      },
+      card: {
+        id: request.card_id,
+        name: request.card_name,
+      },
+      message: request.message,
+      status: request.status,
+      createdAt: request.created_at,
+      expiresAt: request.expires_at,
+    }));
+
+    return c.json({
+      success: true,
+      data: requests,
+    });
+  } catch (error) {
+    console.error('Get exchange requests error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to get exchange requests',
+    }, 500);
+  }
+});
+
+/**
+ * POST /exchanges/requests/:id/respond
+ * 交換リクエストに応答（承認/拒否）（要認証）
+ */
+exchanges.post('/requests/:id/respond', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const requestId = c.req.param('id');
+    const body = await c.req.json();
+    const { action, myCardId, memo, location_name, latitude, longitude } = body;
+
+    // バリデーション
+    if (!['accept', 'reject'].includes(action)) {
+      return c.json({
+        success: false,
+        error: 'Action must be either "accept" or "reject"',
+      }, 400);
+    }
+
+    if (action === 'accept' && !myCardId) {
+      return c.json({
+        success: false,
+        error: 'Your card ID is required when accepting',
+      }, 400);
+    }
+
+    // 交換リクエストを取得
+    const request = await c.env.DB.prepare(
+      'SELECT * FROM exchange_requests WHERE id = ? AND to_user_id = ? AND status = "pending" AND expires_at > datetime("now")'
+    ).bind(requestId, currentUser.userId).first() as any;
+
+    if (!request) {
+      return c.json({
+        success: false,
+        error: 'Exchange request not found or expired',
+      }, 404);
+    }
+
+    if (action === 'reject') {
+      // リクエストを拒否
+      await c.env.DB.prepare(
+        'UPDATE exchange_requests SET status = "rejected" WHERE id = ?'
+      ).bind(requestId).run();
+
+      return c.json({
+        success: true,
+        message: 'Exchange request rejected',
+      });
+    }
+
+    // 承認の場合
+    // 自分のカードを確認
+    const myCard = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ? AND user_id = ?'
+    ).bind(myCardId, currentUser.userId).first() as Card | null;
+
+    if (!myCard) {
+      return c.json({
+        success: false,
+        error: 'Your card not found or not owned by you',
+      }, 404);
+    }
+
+    // 相手のカードを確認
+    const otherCard = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ?'
+    ).bind(request.card_id).first() as Card | null;
+
+    if (!otherCard) {
+      return c.json({
+        success: false,
+        error: 'Requested card not found',
+      }, 404);
+    }
+
+    // 相互交換を実行
+    const exchangeId1 = crypto.randomUUID();
+    const exchangeId2 = crypto.randomUUID();
+
+    // 現在のユーザーが相手のカードをコレクション
+    await c.env.DB.prepare(
+      'INSERT INTO exchanges (id, owner_user_id, collected_card_id, memo, location_name, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      exchangeId1,
+      currentUser.userId,
+      otherCard.id,
+      memo || `近距離交換で ${otherCard.card_name} を取得`,
+      location_name,
+      latitude,
+      longitude
+    ).run();
+
+    // 相手のユーザーが現在のユーザーのカードをコレクション
+    await c.env.DB.prepare(
+      'INSERT INTO exchanges (id, owner_user_id, collected_card_id, memo, location_name, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      exchangeId2,
+      otherCard.user_id,
+      myCard.id,
+      `近距離交換で ${myCard.card_name} を取得`,
+      location_name,
+      latitude,
+      longitude
+    ).run();
+
+    // リクエストを承認済みに更新
+    await c.env.DB.prepare(
+      'UPDATE exchange_requests SET status = "accepted" WHERE id = ?'
+    ).bind(requestId).run();
+
+    return c.json({
+      success: true,
+      message: 'Exchange request accepted and cards exchanged',
+      data: {
+        exchange1: {
+          id: exchangeId1,
+          collectorUserId: currentUser.userId,
+          collectedCard: {
+            id: otherCard.id,
+            name: otherCard.card_name,
+          },
+        },
+        exchange2: {
+          id: exchangeId2,
+          collectorUserId: otherCard.user_id,
+          collectedCard: {
+            id: myCard.id,
+            name: myCard.card_name,
+          },
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Respond to exchange request error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to respond to exchange request',
     }, 500);
   }
 });

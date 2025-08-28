@@ -1,6 +1,14 @@
 import { Hono } from 'hono';
 import { authMiddleware, getCurrentUser } from '../middleware/auth';
-import type { HonoEnv, CreateCardRequest, UpdateCardRequest, Card, UploadUrlRequest } from '../types';
+import type { HonoEnv, CreateCardRequest, UpdateCardRequest, Card, UploadUrlRequest, GenerateQRRequest, ShareCardRequest } from '../types';
+import { 
+  generateExchangeToken, 
+  generateCardExchangeQRData,
+  generateCardShareURL,
+  validateCardName,
+  validateCardLinks,
+  validateFileName
+} from '../utils';
 
 const cards = new Hono<HonoEnv>();
 
@@ -19,6 +27,13 @@ cards.post('/upload-url', authMiddleware, async (c) => {
       return c.json({
         success: false,
         error: 'fileName and fileSize are required',
+      }, 400);
+    }
+
+    if (!validateFileName(fileName)) {
+      return c.json({
+        success: false,
+        error: 'Invalid file name or unsupported file type',
       }, 400);
     }
 
@@ -221,10 +236,17 @@ cards.post('/', authMiddleware, async (c) => {
     const { card_name, image_key, links } = body;
 
     // バリデーション
-    if (!card_name) {
+    if (!validateCardName(card_name)) {
       return c.json({
         success: false,
-        error: 'Card name is required',
+        error: 'Invalid card name. Must be 1-100 characters.',
+      }, 400);
+    }
+
+    if (links && !validateCardLinks(links)) {
+      return c.json({
+        success: false,
+        error: 'Invalid links. Maximum 4 links allowed with valid URLs.',
       }, 400);
     }
 
@@ -708,6 +730,156 @@ cards.get('/exchange', async (c) => {
       </body>
       </html>
     `, 500);
+  }
+});
+
+/**
+ * POST /cards/:id/generate-qr
+ * QRコード交換用のデータを生成（要認証）
+ */
+cards.post('/:id/generate-qr', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const cardId = c.req.param('id');
+
+    // カードの存在確認と所有者チェック
+    const card = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ? AND user_id = ?'
+    ).bind(cardId, currentUser.userId).first() as Card | null;
+
+    if (!card) {
+      return c.json({
+        success: false,
+        error: 'Card not found or not owned by you',
+      }, 404);
+    }
+
+    // 交換用トークンを生成
+    const exchangeToken = generateExchangeToken();
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30分後
+
+    // トークンをデータベースに保存
+    await c.env.DB.prepare(
+      'INSERT INTO qr_exchange_tokens (token, user_id, card_id, expires_at) VALUES (?, ?, ?, ?)'
+    ).bind(exchangeToken, currentUser.userId, cardId, expiresAt.toISOString()).run();
+
+    // QRコード用のデータを生成
+    const qrData = generateCardExchangeQRData(cardId, currentUser.userId, exchangeToken);
+
+    return c.json({
+      success: true,
+      data: {
+        qrData,
+        cardId: card.id,
+        cardName: card.card_name,
+        token: exchangeToken,
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('Generate QR error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to generate QR code',
+    }, 500);
+  }
+});
+
+/**
+ * POST /cards/:id/share
+ * カード共有用のURLを生成（要認証）
+ */
+cards.post('/:id/share', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const cardId = c.req.param('id');
+
+    // カードの存在確認と所有者チェック
+    const card = await c.env.DB.prepare(
+      'SELECT id, user_id, card_name FROM cards WHERE id = ? AND user_id = ?'
+    ).bind(cardId, currentUser.userId).first() as Card | null;
+
+    if (!card) {
+      return c.json({
+        success: false,
+        error: 'Card not found or not owned by you',
+      }, 404);
+    }
+
+    // 共有URL生成
+    const shareUrl = generateCardShareURL(cardId);
+    
+    // QR用データ（交換用ではなく閲覧用）
+    const qrData = JSON.stringify({
+      type: 'card_view',
+      cardId: card.id,
+      shareUrl,
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        shareUrl,
+        qrData,
+        cardId: card.id,
+        cardName: card.card_name,
+      },
+    });
+  } catch (error) {
+    console.error('Share card error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to generate share URL',
+    }, 500);
+  }
+});
+
+/**
+ * GET /cards/public/:id
+ * 公開カード情報を取得（認証不要）
+ */
+cards.get('/public/:id', async (c) => {
+  try {
+    const cardId = c.req.param('id');
+
+    // カード情報を取得（パブリック用）
+    const card = await c.env.DB.prepare(`
+      SELECT 
+        c.id, 
+        c.card_name, 
+        c.image_key, 
+        c.links,
+        u.name as owner_name
+      FROM cards c 
+      JOIN users u ON c.user_id = u.id 
+      WHERE c.id = ?
+    `).bind(cardId).first() as any;
+
+    if (!card) {
+      return c.json({
+        success: false,
+        error: 'Card not found',
+      }, 404);
+    }
+
+    const imageUrl = card.image_key ? `/cards/image/${card.image_key}` : null;
+
+    return c.json({
+      success: true,
+      data: {
+        id: card.id,
+        card_name: card.card_name,
+        image_url: imageUrl,
+        links: card.links ? JSON.parse(card.links) : null,
+        owner_name: card.owner_name,
+      },
+    });
+  } catch (error) {
+    console.error('Get public card error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to get card',
+    }, 500);
   }
 });
 

@@ -63,12 +63,10 @@ export function verifyEmailVerificationToken(token: string, secret: string): { u
 }
 
 /**
- * R2用の署名付きURLを生成する（アップロード用）
+ * カード共有用のURLを生成する
  */
-export async function generateUploadURL(r2: R2Bucket, key: string): Promise<string> {
-  // 24時間有効な署名付きURLを生成
-  const url = await r2.createMultipartUpload(key);
-  return url.uploadId; // 実際の実装では適切な署名付きURLを返す
+export function generateCardShareURL(cardId: string, baseUrl: string = 'https://flocka.net'): string {
+  return `${baseUrl}/card/${cardId}`;
 }
 
 /**

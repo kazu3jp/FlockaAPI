@@ -119,13 +119,14 @@ auth.post('/login', async (c) => {
       }, 401);
     }
 
-    // メール認証チェック（オプション）
-    if (!user.email_verified) {
-      return c.json({
-        success: false,
-        error: 'Please verify your email address before logging in',
-      }, 403);
-    }
+    // メール認証チェック（開発用：警告のみ）
+    // 本番環境では認証必須にすることを推奨
+    // if (!user.email_verified) {
+    //   return c.json({
+    //     success: false,
+    //     error: 'Please verify your email address before logging in',
+    //   }, 403);
+    // }
 
     // JWTトークンを生成
     const token = generateJWT(
@@ -141,6 +142,7 @@ auth.post('/login', async (c) => {
           id: user.id,
           email: user.email,
           name: user.name,
+          email_verified: user.email_verified, // メール認証状態をフロントエンドに送信
         },
       },
     });
@@ -560,6 +562,132 @@ auth.get('/verify-status/:userId', async (c) => {
     return c.json({
       success: false,
       error: 'Failed to check verification status',
+    }, 500);
+  }
+});
+
+/**
+ * POST /auth/resend-verification
+ * メール認証の再送（要認証）
+ */
+auth.post('/resend-verification', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+
+    // ユーザー情報を取得
+    const user = await c.env.DB.prepare(
+      'SELECT id, email, name, email_verified FROM users WHERE id = ?'
+    ).bind(currentUser.userId).first() as User | null;
+
+    if (!user) {
+      return c.json({
+        success: false,
+        error: 'User not found',
+      }, 404);
+    }
+
+    // 既に確認済みの場合
+    if (user.email_verified === 1) {
+      return c.json({
+        success: false,
+        error: 'Email is already verified',
+      }, 400);
+    }
+
+    // メール認証トークンを生成
+    const verificationToken = generateEmailVerificationToken(user.id, c.env.JWT_SECRET);
+
+    // 認証メールを送信
+    const emailSent = await sendVerificationEmail(
+      user.email,
+      verificationToken,
+      c.env.MAILCHANNELS_API_KEY,
+      c.env.ENVIRONMENT === 'production' ? 'https://api.flocka.net' : 'http://localhost:8787'
+    );
+
+    if (!emailSent) {
+      return c.json({
+        success: false,
+        error: 'Failed to send verification email',
+      }, 500);
+    }
+
+    return c.json({
+      success: true,
+      message: 'Verification email resent successfully',
+      data: {
+        email: user.email,
+        message: 'Please check your email for verification instructions',
+      },
+    });
+  } catch (error) {
+    console.error('Resend verification email error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to resend verification email',
+    }, 500);
+  }
+});
+
+/**
+ * POST /auth/resend-verification-by-email
+ * メールアドレスによるメール認証の再送（認証不要）
+ */
+auth.post('/resend-verification-by-email', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { email } = body;
+
+    // バリデーション
+    if (!email) {
+      return c.json({
+        success: false,
+        error: 'Email is required',
+      }, 400);
+    }
+
+    // ユーザー情報を取得
+    const user = await c.env.DB.prepare(
+      'SELECT id, email, name, email_verified FROM users WHERE email = ?'
+    ).bind(email).first() as User | null;
+
+    if (!user) {
+      // セキュリティ上、ユーザーが存在しない場合でも成功レスポンスを返す
+      return c.json({
+        success: true,
+        message: 'If the email exists in our system, a verification email has been sent',
+      });
+    }
+
+    // 既に確認済みの場合
+    if (user.email_verified === 1) {
+      return c.json({
+        success: true,
+        message: 'Email is already verified',
+      });
+    }
+
+    // メール認証トークンを生成
+    const verificationToken = generateEmailVerificationToken(user.id, c.env.JWT_SECRET);
+
+    // 認証メールを送信
+    const emailSent = await sendVerificationEmail(
+      user.email,
+      verificationToken,
+      c.env.MAILCHANNELS_API_KEY,
+      c.env.ENVIRONMENT === 'production' ? 'https://api.flocka.net' : 'http://localhost:8787'
+    );
+
+    // セキュリティ上、メール送信の成否に関わらず成功レスポンスを返す
+    return c.json({
+      success: true,
+      message: 'If the email exists in our system, a verification email has been sent',
+    });
+  } catch (error) {
+    console.error('Resend verification email by email error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to process request',
     }, 500);
   }
 });

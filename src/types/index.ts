@@ -62,6 +62,10 @@ export interface VerifyEmailRequest {
   token: string;
 }
 
+export interface ResendVerificationRequest {
+  email: string;
+}
+
 export interface CreateCardRequest {
   card_name: string;
   image_key?: string;
@@ -108,6 +112,67 @@ export interface MutualExchangeRequest {
   location_name?: string;
   latitude?: number;
   longitude?: number;
+}
+
+// QRコード交換関連
+export interface QRExchangeRequest {
+  qrData: string;
+  myCardId: string;
+  memo?: string;
+  location_name?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface GenerateQRRequest {
+  cardId: string;
+}
+
+export interface QRExchangeData {
+  type: 'card_exchange';
+  cardId: string;
+  userId: string;
+  token: string;
+  timestamp: number;
+}
+
+// 近距離交換関連（BLE用）- アプリで完結
+export interface SendExchangeRequestParams {
+  targetUserId: string;
+  cardId: string;
+  message?: string;
+}
+
+export interface ExchangeRequestResponse {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  cardId: string;
+  message?: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  created_at: string;
+}
+
+// URL共有関連
+export interface ShareCardRequest {
+  cardId: string;
+}
+
+export interface ShareCardResponse {
+  shareUrl: string;
+  qrData: string;
+}
+
+// カード詳細表示用（共有URL用）
+export interface PublicCard {
+  id: string;
+  card_name: string;
+  image_url?: string;
+  links?: Array<{
+    title: string;
+    url: string;
+  }>;
+  owner_name: string;
 }
 
 export interface JWTPayload {
