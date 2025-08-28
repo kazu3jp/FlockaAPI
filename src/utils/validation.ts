@@ -64,7 +64,7 @@ export function validateCardName(name: string): boolean {
 export function validateBio(bio: string): boolean {
   return (
     typeof bio === 'string' &&
-    bio.length <= 200
+    bio.length <= 80 // 80文字制限に変更
   );
 }
 

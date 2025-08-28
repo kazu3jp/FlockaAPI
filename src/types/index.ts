@@ -30,6 +30,7 @@ export interface Card {
   id: string;
   user_id: string;
   card_name: string;
+  bio?: string; // 80文字制限の自己紹介
   image_key?: string;
   links?: string; // JSON文字列
   created_at: string;
@@ -68,6 +69,7 @@ export interface ResendVerificationRequest {
 
 export interface CreateCardRequest {
   card_name: string;
+  bio?: string; // 80文字制限の自己紹介
   image_key?: string;
   links?: Array<{
     title: string;
@@ -83,6 +85,7 @@ export interface UploadUrlRequest {
 
 export interface UpdateCardRequest {
   card_name?: string;
+  bio?: string; // 80文字制限の自己紹介
   image_key?: string;
   links?: Array<{
     title: string;

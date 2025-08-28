@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS cards (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     user_id TEXT NOT NULL,
     card_name TEXT NOT NULL,
+    bio TEXT CHECK (length(bio) <= 80), -- 80文字制限の自己紹介
     image_key TEXT, -- R2のオブジェクトキー
     links TEXT, -- JSON形式のリンク情報
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

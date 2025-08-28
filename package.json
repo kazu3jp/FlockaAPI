@@ -1,6 +1,6 @@
 {
   "name": "flocka-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Flocka - デジタルプロフィールカード交換アプリのバックエンドAPI",
   "type": "module",
   "scripts": {

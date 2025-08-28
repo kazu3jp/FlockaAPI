@@ -7,7 +7,8 @@ import {
   generateCardShareURL,
   validateCardName,
   validateCardLinks,
-  validateFileName
+  validateFileName,
+  validateBio
 } from '../utils';
 
 const cards = new Hono<HonoEnv>();
@@ -233,13 +234,20 @@ cards.post('/', authMiddleware, async (c) => {
   try {
     const currentUser = getCurrentUser(c);
     const body: CreateCardRequest = await c.req.json();
-    const { card_name, image_key, links } = body;
+    const { card_name, bio, image_key, links } = body;
 
     // バリデーション
     if (!validateCardName(card_name)) {
       return c.json({
         success: false,
         error: 'Invalid card name. Must be 1-100 characters.',
+      }, 400);
+    }
+
+    if (bio && !validateBio(bio)) {
+      return c.json({
+        success: false,
+        error: 'Invalid bio. Must be 80 characters or less.',
       }, 400);
     }
 
@@ -256,8 +264,8 @@ cards.post('/', authMiddleware, async (c) => {
     // カードをデータベースに保存
     const cardId = crypto.randomUUID();
     await c.env.DB.prepare(
-      'INSERT INTO cards (id, user_id, card_name, image_key, links) VALUES (?, ?, ?, ?, ?)'
-    ).bind(cardId, currentUser.userId, card_name, image_key || null, linksJson).run();
+      'INSERT INTO cards (id, user_id, card_name, bio, image_key, links) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(cardId, currentUser.userId, card_name, bio || null, image_key || null, linksJson).run();
 
     // 作成されたカードを取得
     const createdCard = await c.env.DB.prepare(
@@ -328,7 +336,7 @@ cards.put('/:id', authMiddleware, async (c) => {
     const currentUser = getCurrentUser(c);
     const cardId = c.req.param('id');
     const body: UpdateCardRequest = await c.req.json();
-    const { card_name, image_key, links } = body;
+    const { card_name, bio, image_key, links } = body;
 
     // カードの存在確認と所有者チェック
     const existingCard = await c.env.DB.prepare(
@@ -349,6 +357,28 @@ cards.put('/:id', authMiddleware, async (c) => {
       }, 403);
     }
 
+    // バリデーション
+    if (card_name !== undefined && !validateCardName(card_name)) {
+      return c.json({
+        success: false,
+        error: 'Invalid card name. Must be 1-100 characters.',
+      }, 400);
+    }
+
+    if (bio !== undefined && bio !== null && !validateBio(bio)) {
+      return c.json({
+        success: false,
+        error: 'Invalid bio. Must be 80 characters or less.',
+      }, 400);
+    }
+
+    if (links !== undefined && links !== null && !validateCardLinks(links)) {
+      return c.json({
+        success: false,
+        error: 'Invalid links. Maximum 4 links allowed with valid URLs.',
+      }, 400);
+    }
+
     // 更新フィールドを準備
     const updates: string[] = [];
     const values: any[] = [];
@@ -356,6 +386,11 @@ cards.put('/:id', authMiddleware, async (c) => {
     if (card_name !== undefined) {
       updates.push('card_name = ?');
       values.push(card_name);
+    }
+
+    if (bio !== undefined) {
+      updates.push('bio = ?');
+      values.push(bio || null);
     }
 
     if (image_key !== undefined) {
@@ -604,7 +639,7 @@ cards.get('/exchange', async (c) => {
 
     // カード情報を取得
     const card = await c.env.DB.prepare(
-      'SELECT c.id, c.card_name, c.image_key, u.name as owner_name FROM cards c JOIN users u ON c.user_id = u.id WHERE c.id = ?'
+      'SELECT c.id, c.card_name, c.bio, c.image_key, u.name as owner_name FROM cards c JOIN users u ON c.user_id = u.id WHERE c.id = ?'
     ).bind(tokenData.cardId).first() as any;
 
     if (!card) {
@@ -647,6 +682,7 @@ cards.get('/exchange', async (c) => {
           .logo { font-size: 2em; font-weight: bold; color: #007bff; margin-bottom: 20px; }
           .card-preview { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
           .card-name { font-size: 1.5em; font-weight: bold; color: #333; margin-bottom: 10px; }
+          .card-bio { color: #666; margin-bottom: 10px; font-style: italic; }
           .owner-name { color: #666; margin-bottom: 20px; }
           .btn { display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin: 10px; cursor: pointer; border: none; font-size: 16px; }
           .btn:hover { background: #0056b3; }
@@ -684,6 +720,7 @@ cards.get('/exchange', async (c) => {
           
           <div class="card-preview">
             <div class="card-name">${card.card_name}</div>
+            ${card.bio ? `<div class="card-bio">"${card.bio}"</div>` : ''}
             <div class="owner-name">by ${card.owner_name || '匿名ユーザー'}</div>
           </div>
           
@@ -846,7 +883,8 @@ cards.get('/public/:id', async (c) => {
     const card = await c.env.DB.prepare(`
       SELECT 
         c.id, 
-        c.card_name, 
+        c.card_name,
+        c.bio,
         c.image_key, 
         c.links,
         u.name as owner_name
@@ -869,6 +907,7 @@ cards.get('/public/:id', async (c) => {
       data: {
         id: card.id,
         card_name: card.card_name,
+        bio: card.bio,
         image_url: imageUrl,
         links: card.links ? JSON.parse(card.links) : null,
         owner_name: card.owner_name || '匿名ユーザー',
