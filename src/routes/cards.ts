@@ -684,7 +684,7 @@ cards.get('/exchange', async (c) => {
           
           <div class="card-preview">
             <div class="card-name">${card.card_name}</div>
-            <div class="owner-name">by ${card.owner_name}</div>
+            <div class="owner-name">by ${card.owner_name || '匿名ユーザー'}</div>
           </div>
           
           <p>このカードと交換しますか？</p>
@@ -871,7 +871,7 @@ cards.get('/public/:id', async (c) => {
         card_name: card.card_name,
         image_url: imageUrl,
         links: card.links ? JSON.parse(card.links) : null,
-        owner_name: card.owner_name,
+        owner_name: card.owner_name || '匿名ユーザー',
       },
     });
   } catch (error) {

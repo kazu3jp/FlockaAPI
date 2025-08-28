@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { hashPassword, verifyPassword, generateJWT, generateEmailVerificationToken, verifyEmailVerificationToken } from '../utils/auth';
 import { sendVerificationEmail } from '../utils/email';
+import { validateUserName } from '../utils/validation';
 import { authMiddleware, getCurrentUser } from '../middleware/auth';
 import type { HonoEnv, RegisterRequest, LoginRequest, VerifyEmailRequest, User } from '../types';
 
@@ -16,10 +17,17 @@ auth.post('/register', async (c) => {
     const { email, name, password } = body;
 
     // バリデーション
-    if (!email || !name || !password) {
+    if (!email || !password) {
       return c.json({
         success: false,
-        error: 'Email, name, and password are required',
+        error: 'Email and password are required',
+      }, 400);
+    }
+
+    if (!validateUserName(name)) {
+      return c.json({
+        success: false,
+        error: 'Name must be a valid string (max 100 characters)',
       }, 400);
     }
 
@@ -49,7 +57,7 @@ auth.post('/register', async (c) => {
     const userId = crypto.randomUUID();
     await c.env.DB.prepare(
       'INSERT INTO users (id, email, name, hashed_password) VALUES (?, ?, ?, ?)'
-    ).bind(userId, email, name, hashedPassword).run();
+    ).bind(userId, email, name || null, hashedPassword).run();
 
     // メール認証トークンを生成
     const verificationToken = generateEmailVerificationToken(userId, c.env.JWT_SECRET);

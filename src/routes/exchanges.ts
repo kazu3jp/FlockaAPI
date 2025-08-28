@@ -142,7 +142,7 @@ exchanges.get('/', authMiddleware, async (c) => {
         image_key: exchange.image_key,
         links: exchange.links ? JSON.parse(exchange.links) : null,
         creator: {
-          name: exchange.card_creator_name,
+          name: exchange.card_creator_name || '匿名ユーザー',
           email: exchange.card_creator_email,
         },
       },
@@ -333,7 +333,7 @@ exchanges.get('/:id', authMiddleware, async (c) => {
         image_key: exchangeResult.image_key,
         links: exchangeResult.links ? JSON.parse(exchangeResult.links as string) : null,
         creator: {
-          name: exchangeResult.card_creator_name,
+          name: exchangeResult.card_creator_name || '匿名ユーザー',
           email: exchangeResult.card_creator_email,
         },
       },
@@ -796,7 +796,7 @@ exchanges.post('/request', authMiddleware, async (c) => {
         requestId,
         targetUser: {
           id: targetUser.id,
-          name: targetUser.name,
+          name: targetUser.name || '匿名ユーザー',
         },
         card: {
           id: card.id,
@@ -846,7 +846,7 @@ exchanges.get('/requests', authMiddleware, async (c) => {
       id: request.id,
       fromUser: {
         id: request.from_user_id,
-        name: request.from_user_name,
+        name: request.from_user_name || '匿名ユーザー',
       },
       card: {
         id: request.card_id,

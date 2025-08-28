@@ -109,6 +109,18 @@ export function validateCoordinates(latitude?: number, longitude?: number): bool
 }
 
 /**
+ * ユーザー名のバリデーション（オプション）
+ */
+export function validateUserName(name?: string): boolean {
+  if (name === undefined || name === null) return true; // オプション
+  return (
+    typeof name === 'string' &&
+    name.trim().length > 0 &&
+    name.length <= 100
+  );
+}
+
+/**
  * エラーメッセージを生成する
  */
 export function createValidationError(field: string, message: string): string {

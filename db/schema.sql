@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     email TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
+    name TEXT, -- null許容に変更
     hashed_password TEXT NOT NULL,
     email_verified INTEGER DEFAULT 0 CHECK (email_verified IN (0, 1)),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP

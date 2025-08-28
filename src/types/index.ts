@@ -20,7 +20,7 @@ export interface HonoEnv {
 export interface User {
   id: string;
   email: string;
-  name: string;
+  name?: string; // null許容に変更
   hashed_password: string;
   email_verified: number;
   created_at: string;
@@ -49,7 +49,7 @@ export interface Exchange {
 // APIリクエスト/レスポンスの型定義
 export interface RegisterRequest {
   email: string;
-  name: string;
+  name?: string; // オプショナルに変更
   password: string;
 }
 
