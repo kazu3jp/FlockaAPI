@@ -61,6 +61,15 @@ export interface QRExchangeLog {
   created_at: string;
 }
 
+export interface PasswordResetToken {
+  token: string;
+  user_id: string;
+  email: string;
+  created_at: string;
+  expires_at: string;
+  used: number;
+}
+
 // APIリクエスト/レスポンスの型定義
 export interface RegisterRequest {
   email: string;
@@ -79,6 +88,15 @@ export interface VerifyEmailRequest {
 
 export interface ResendVerificationRequest {
   email: string;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPassword: string;
 }
 
 export interface CreateCardRequest {

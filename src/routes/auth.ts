@@ -3,7 +3,7 @@ import { hashPassword, verifyPassword, generateJWT, generateEmailVerificationTok
 import { sendVerificationEmail } from '../utils/email';
 import { validateUserName } from '../utils/validation';
 import { authMiddleware, getCurrentUser } from '../middleware/auth';
-import type { HonoEnv, RegisterRequest, LoginRequest, VerifyEmailRequest, User } from '../types';
+import type { HonoEnv, RegisterRequest, LoginRequest, VerifyEmailRequest, ForgotPasswordRequest, ResetPasswordRequest, User } from '../types';
 
 const auth = new Hono<HonoEnv>();
 
@@ -698,6 +698,281 @@ auth.post('/resend-verification-by-email', async (c) => {
       error: 'Failed to process request',
     }, 500);
   }
+});
+
+/**
+ * POST /auth/forgot-password
+ * パスワード再設定リクエスト（メール送信）
+ */
+auth.post('/forgot-password', async (c) => {
+  try {
+    const body: { email: string } = await c.req.json();
+    const { email } = body;
+
+    if (!email) {
+      return c.json({
+        success: false,
+        error: 'Email is required',
+      }, 400);
+    }
+
+    // ユーザー情報を取得
+    const user = await c.env.DB.prepare(
+      'SELECT id, email, name FROM users WHERE email = ? AND email_verified = 1'
+    ).bind(email).first() as User | null;
+
+    if (!user) {
+      // セキュリティ上、ユーザーが存在しない場合でも成功レスポンスを返す
+      return c.json({
+        success: true,
+        message: 'If the email exists in our system, a password reset email has been sent',
+      });
+    }
+
+    // 既存の未使用トークンを無効化
+    await c.env.DB.prepare(
+      'UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0'
+    ).bind(user.id).run();
+
+    // パスワード再設定トークンを生成
+    const resetToken = crypto.randomUUID();
+    
+    // トークンをデータベースに保存
+    await c.env.DB.prepare(
+      'INSERT INTO password_reset_tokens (token, user_id, email) VALUES (?, ?, ?)'
+    ).bind(resetToken, user.id, user.email).run();
+
+    // パスワード再設定メールを送信
+    const baseUrl = c.env.ENVIRONMENT === 'production' ? 'https://api.flocka.net' : 'http://localhost:8787';
+    const resetUrl = `${baseUrl}/auth/reset-password?token=${resetToken}`;
+    
+    const emailHtml = `
+      <h2>パスワード再設定のご案内</h2>
+      <p>Flockaアカウントのパスワード再設定をリクエストされました。</p>
+      <p>以下のリンクをクリックして、新しいパスワードを設定してください：</p>
+      <a href="${resetUrl}">パスワードを再設定する</a>
+      <p>このリンクは1時間で期限切れになります。</p>
+      <p>もしこのメールに心当たりがない場合は、無視してください。</p>
+    `;
+
+    try {
+      await fetch('https://api.mailchannels.net/tx/v1/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${c.env.MAILCHANNELS_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          personalizations: [
+            {
+              to: [{ email: user.email, name: user.name || 'Flocka User' }],
+            },
+          ],
+          from: {
+            email: 'noreply@flocka.net',
+            name: 'Flocka',
+          },
+          subject: 'Flocka - パスワード再設定のご案内',
+          content: [
+            {
+              type: 'text/html',
+              value: emailHtml,
+            },
+          ],
+        }),
+      });
+    } catch (emailError) {
+      console.error('Failed to send password reset email:', emailError);
+    }
+
+    return c.json({
+      success: true,
+      message: 'If the email exists in our system, a password reset email has been sent',
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to process password reset request',
+    }, 500);
+  }
+});
+
+/**
+ * POST /auth/reset-password
+ * パスワード再設定の実行
+ */
+auth.post('/reset-password', async (c) => {
+  try {
+    const body: { token: string; newPassword: string } = await c.req.json();
+    const { token, newPassword } = body;
+
+    if (!token || !newPassword) {
+      return c.json({
+        success: false,
+        error: 'Token and new password are required',
+      }, 400);
+    }
+
+    if (newPassword.length < 8) {
+      return c.json({
+        success: false,
+        error: 'Password must be at least 8 characters long',
+      }, 400);
+    }
+
+    // トークンの有効性を確認
+    const resetToken = await c.env.DB.prepare(
+      'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > datetime("now")'
+    ).bind(token).first() as any;
+
+    if (!resetToken) {
+      return c.json({
+        success: false,
+        error: 'Invalid or expired reset token',
+      }, 400);
+    }
+
+    // ユーザー情報を取得
+    const user = await c.env.DB.prepare(
+      'SELECT id, email FROM users WHERE id = ?'
+    ).bind(resetToken.user_id).first() as User | null;
+
+    if (!user) {
+      return c.json({
+        success: false,
+        error: 'User not found',
+      }, 404);
+    }
+
+    // パスワードをハッシュ化
+    const hashedPassword = await hashPassword(newPassword);
+
+    // パスワードを更新
+    await c.env.DB.prepare(
+      'UPDATE users SET hashed_password = ? WHERE id = ?'
+    ).bind(hashedPassword, user.id).run();
+
+    // トークンを使用済みにマーク
+    await c.env.DB.prepare(
+      'UPDATE password_reset_tokens SET used = 1 WHERE token = ?'
+    ).bind(token).run();
+
+    return c.json({
+      success: true,
+      message: 'Password has been reset successfully',
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to reset password',
+    }, 500);
+  }
+});
+
+/**
+ * GET /auth/reset-password
+ * パスワード再設定ページ（HTML）
+ */
+auth.get('/reset-password', async (c) => {
+  const token = c.req.query('token');
+  
+  if (!token) {
+    return c.html(`
+      <html>
+        <head><title>Flocka - エラー</title></head>
+        <body>
+          <h1>エラー</h1>
+          <p>無効なリクエストです。</p>
+        </body>
+      </html>
+    `, 400);
+  }
+
+  // トークンの有効性を確認
+  const resetToken = await c.env.DB.prepare(
+    'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > datetime("now")'
+  ).bind(token).first();
+
+  if (!resetToken) {
+    return c.html(`
+      <html>
+        <head><title>Flocka - トークンエラー</title></head>
+        <body>
+          <h1>無効なトークン</h1>
+          <p>パスワード再設定トークンが無効または期限切れです。</p>
+          <p>新しいパスワード再設定リクエストを送信してください。</p>
+        </body>
+      </html>
+    `, 400);
+  }
+
+  return c.html(`
+    <html>
+      <head>
+        <title>Flocka - パスワード再設定</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }
+          input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+          button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+          button:hover { background: #0056b3; }
+          .error { color: red; margin: 10px 0; }
+          .success { color: green; margin: 10px 0; }
+        </style>
+      </head>
+      <body>
+        <h1>パスワード再設定</h1>
+        <form id="resetForm">
+          <input type="hidden" id="token" value="${token}">
+          <input type="password" id="newPassword" placeholder="新しいパスワード (8文字以上)" required>
+          <input type="password" id="confirmPassword" placeholder="パスワード確認" required>
+          <button type="submit">パスワードを再設定</button>
+        </form>
+        <div id="message"></div>
+        
+        <script>
+          document.getElementById('resetForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const token = document.getElementById('token').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            const messageDiv = document.getElementById('message');
+            
+            if (newPassword !== confirmPassword) {
+              messageDiv.innerHTML = '<div class="error">パスワードが一致しません。</div>';
+              return;
+            }
+            
+            if (newPassword.length < 8) {
+              messageDiv.innerHTML = '<div class="error">パスワードは8文字以上で入力してください。</div>';
+              return;
+            }
+            
+            try {
+              const response = await fetch('/auth/reset-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token, newPassword })
+              });
+              
+              const data = await response.json();
+              
+              if (data.success) {
+                messageDiv.innerHTML = '<div class="success">パスワードが正常に再設定されました。</div>';
+                document.getElementById('resetForm').style.display = 'none';
+              } else {
+                messageDiv.innerHTML = '<div class="error">' + data.error + '</div>';
+              }
+            } catch (error) {
+              messageDiv.innerHTML = '<div class="error">エラーが発生しました。もう一度お試しください。</div>';
+            }
+          });
+        </script>
+      </body>
+    </html>
+  `);
 });
 
 export default auth;

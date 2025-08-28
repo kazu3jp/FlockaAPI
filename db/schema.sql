@@ -83,6 +83,17 @@ CREATE TABLE IF NOT EXISTS qr_exchange_logs (
     FOREIGN KEY (qr_card_id) REFERENCES cards(id) ON DELETE CASCADE
 );
 
+-- パスワード再設定トークンテーブル
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME DEFAULT (datetime('now', '+1 hour')), -- 1時間で期限切れ
+    used INTEGER DEFAULT 0 CHECK (used IN (0, 1)),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- インデックスの作成
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_cards_user_id ON cards(user_id);
@@ -97,3 +108,6 @@ CREATE INDEX IF NOT EXISTS idx_qr_logs_owner ON qr_exchange_logs(qr_owner_user_i
 CREATE INDEX IF NOT EXISTS idx_qr_logs_scanner ON qr_exchange_logs(scanner_user_id);
 CREATE INDEX IF NOT EXISTS idx_qr_logs_notified ON qr_exchange_logs(notified);
 CREATE INDEX IF NOT EXISTS idx_qr_logs_created ON qr_exchange_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_email ON password_reset_tokens(email);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires ON password_reset_tokens(expires_at);

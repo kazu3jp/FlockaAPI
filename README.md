@@ -1,6 +1,6 @@
-# 🎴 Flocka API v1.3.0
+# 🎴 Flocka API v1.4.0
 
-デジタルプロフィールカード交換プラットフォームのバックエンドAPI - **QR即時交換システム対応**
+デジタルプロフィールカード交換プラットフォームのバックエンドAPI - **QR即時交換システム・パスワードリセット機能対応**
 
 ## 🌟 主な機能
 
@@ -49,6 +49,9 @@
 - `GET /verify` - メールアドレス確認
 - `POST /resend-verification` - メール認証再送（要認証）
 - `POST /resend-verification-by-email` - メール認証再送（メールアドレス指定）
+- `POST /forgot-password` - **パスワードリセット申請**（NEW!）
+- `POST /reset-password` - **パスワードリセット実行**（NEW!）
+- `GET /reset-password` - **パスワードリセットフォーム**（NEW!）
 - `GET /me` - 現在のユーザー情報
 
 ### 🎴 カード管理 (`/cards`) - **bio対応**
@@ -172,6 +175,58 @@ GET /exchanges/qr-logs
 }
 ```
 
+## 🔑 パスワードリセット機能（v1.4.0の新機能）
+
+### 1. パスワードリセット申請
+```bash
+POST /auth/forgot-password
+```
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**レスポンス:**
+```json
+{
+  "success": true,
+  "message": "パスワードリセットメールを送信しました"
+}
+```
+
+### 2. パスワードリセット実行
+```bash
+POST /auth/reset-password
+```
+```json
+{
+  "token": "reset-token-from-email",
+  "newPassword": "new-secure-password"
+}
+```
+
+**レスポンス:**
+```json
+{
+  "success": true,
+  "message": "パスワードが正常に更新されました"
+}
+```
+
+### 3. パスワードリセットフォーム（Webブラウザ対応）
+```bash
+GET /auth/reset-password?token=reset-token
+```
+
+HTMLフォームが表示され、新しいパスワードを入力可能です。
+
+### 🔒 セキュリティ仕様
+- **トークン有効期限**: 1時間（3600秒）
+- **ワンタイム使用**: トークンは1回のみ使用可能
+- **メール認証**: 登録済みメールアドレスのみ受付
+- **自動削除**: 期限切れトークンの自動クリーンアップ
+
 ## 🆕 v1.3.0の主な変更点
 
 ### ⚡ QR交換システムの革新
@@ -199,6 +254,7 @@ GET /exchanges/qr-logs
 - `exchanges` - カード交換・コレクション記録
 - `qr_exchange_logs` - **QR交換ログ**（新テーブル）
 - `qr_exchange_tokens` - QR交換用一時トークン
+- `password_reset_tokens` - **パスワードリセットトークン**（新テーブル）
 
 ### 新規テーブル: qr_exchange_logs
 ```sql
@@ -217,11 +273,25 @@ CREATE TABLE qr_exchange_logs (
 );
 ```
 
+### 新規テーブル: password_reset_tokens
+```sql
+CREATE TABLE password_reset_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    used INTEGER DEFAULT 0,          -- 使用済みフラグ
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
 ## 🌐 デプロイ情報
 
 - **Production URL**: https://flocka-api.kazu3jp-purin.workers.dev
 - **Environment**: Cloudflare Workers
-- **Version**: v1.3.0
+- **Version**: v1.4.0
 - **Database**: Cloudflare D1
 - **Storage**: Cloudflare R2
 
@@ -259,6 +329,7 @@ npm run deploy
 - **JWT認証**: セキュアなトークンベース認証
 - **bcrypt暗号化**: パスワードの安全な保存
 - **メール認証**: アカウント確認機能
+- **パスワードリセット**: セキュアなトークンベースのパスワード回復機能
 - **入力バリデーション**: 全エンドポイントでの検証
 - **レート制限**: API悪用防止
 
