@@ -11,6 +11,7 @@ import type {
   SendExchangeRequestParams,
   Card,
   User,
+  Exchange,
   QRExchangeLog
 } from '../types';
 
@@ -188,6 +189,179 @@ exchanges.post('/', authMiddleware, async (c) => {
     return c.json({
       success: false,
       error: 'Failed to create exchange',
+    }, 500);
+  }
+});
+
+/**
+ * PUT /exchanges/:id
+ * コレクションのメモや位置情報を更新（要認証）
+ */
+exchanges.put('/:id', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const exchangeId = c.req.param('id');
+    const body: UpdateExchangeRequest = await c.req.json();
+    const { memo, location_name, latitude, longitude } = body;
+
+    // 交換記録の存在確認と所有者確認
+    const existingExchange = await c.env.DB.prepare(
+      'SELECT id, owner_user_id FROM exchanges WHERE id = ?'
+    ).bind(exchangeId).first() as Exchange | null;
+
+    if (!existingExchange) {
+      return c.json({
+        success: false,
+        error: 'Exchange record not found',
+      }, 404);
+    }
+
+    // 所有者確認
+    if (existingExchange.owner_user_id !== currentUser.userId) {
+      return c.json({
+        success: false,
+        error: 'Not authorized to update this exchange',
+      }, 403);
+    }
+
+    // 更新処理
+    await c.env.DB.prepare(
+      'UPDATE exchanges SET memo = ?, location_name = ?, latitude = ?, longitude = ? WHERE id = ?'
+    ).bind(memo, location_name, latitude, longitude, exchangeId).run();
+
+    return c.json({
+      success: true,
+      message: 'Exchange updated successfully',
+      data: {
+        exchangeId,
+        memo,
+        location_name,
+        latitude,
+        longitude,
+      },
+    });
+  } catch (error) {
+    console.error('Update exchange error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to update exchange',
+    }, 500);
+  }
+});
+
+/**
+ * GET /exchanges/:id
+ * 特定の交換記録詳細を取得（要認証）
+ */
+exchanges.get('/:id', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const exchangeId = c.req.param('id');
+
+    // 交換記録詳細を取得
+    const exchangeResult = await c.env.DB.prepare(`
+      SELECT 
+        e.id,
+        e.memo,
+        e.location_name,
+        e.latitude,
+        e.longitude,
+        e.created_at,
+        c.id as card_id,
+        c.card_name,
+        c.bio,
+        c.image_key,
+        c.links,
+        u.name as owner_name
+      FROM exchanges e
+      JOIN cards c ON e.collected_card_id = c.id
+      JOIN users u ON c.user_id = u.id
+      WHERE e.id = ? AND e.owner_user_id = ?
+    `).bind(exchangeId, currentUser.userId).first();
+
+    if (!exchangeResult) {
+      return c.json({
+        success: false,
+        error: 'Exchange record not found',
+      }, 404);
+    }
+
+    const row = exchangeResult as any;
+    const exchange = {
+      id: row.id,
+      card: {
+        id: row.card_id,
+        card_name: row.card_name,
+        bio: row.bio,
+        image_url: row.image_key ? `https://flocka-storage.kazu3jp-purin.workers.dev/${row.image_key}` : null,
+        links: row.links ? JSON.parse(row.links) : [],
+        owner_name: row.owner_name,
+      },
+      memo: row.memo,
+      location: row.location_name ? {
+        name: row.location_name,
+        latitude: row.latitude,
+        longitude: row.longitude,
+      } : null,
+      collected_at: row.created_at,
+    };
+
+    return c.json({
+      success: true,
+      data: exchange,
+    });
+  } catch (error) {
+    console.error('Get exchange error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to fetch exchange',
+    }, 500);
+  }
+});
+
+/**
+ * DELETE /exchanges/:id
+ * コレクションから交換記録を削除（要認証）
+ */
+exchanges.delete('/:id', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const exchangeId = c.req.param('id');
+
+    // 交換記録の存在確認と所有者確認
+    const existingExchange = await c.env.DB.prepare(
+      'SELECT id, owner_user_id FROM exchanges WHERE id = ?'
+    ).bind(exchangeId).first() as Exchange | null;
+
+    if (!existingExchange) {
+      return c.json({
+        success: false,
+        error: 'Exchange record not found',
+      }, 404);
+    }
+
+    // 所有者確認
+    if (existingExchange.owner_user_id !== currentUser.userId) {
+      return c.json({
+        success: false,
+        error: 'Not authorized to delete this exchange',
+      }, 403);
+    }
+
+    // 削除処理
+    await c.env.DB.prepare(
+      'DELETE FROM exchanges WHERE id = ?'
+    ).bind(exchangeId).run();
+
+    return c.json({
+      success: true,
+      message: 'Exchange deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete exchange error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to delete exchange',
     }, 500);
   }
 });
