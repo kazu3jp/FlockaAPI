@@ -77,6 +77,7 @@
 - `POST /qr/generate` - QRコード生成
 - `POST /qr` - **QR即時交換実行**（NEW!）
 - `GET /qr-logs` - **QR交換履歴取得**（NEW!）
+- `DELETE /qr/logs/:id` - **QR交換ログ削除**（NEW!）
 
 ### 📚 コレクション管理 (`/exchanges`)
 
@@ -193,6 +194,49 @@ GET /exchanges/qr-logs
   }
 }
 ```
+
+### 4. QR交換ログ削除
+
+```bash
+DELETE /exchanges/qr/logs/:id
+```
+
+**レスポンス:**
+
+```json
+{
+  "success": true,
+  "message": "QR exchange log deleted successfully"
+}
+```
+
+**注意:** QRコード作成者またはスキャンした人のみがログを削除できます。
+
+### 🚨 エラーハンドリング強化（v1.4.0の新機能）
+
+QR関連のエンドポイントでエラーが発生した場合、詳細なエラー情報とトラッキング用のIDを返します：
+
+**エラーレスポンス例:**
+
+```json
+{
+  "success": false,
+  "error": "Failed to complete QR exchange",
+  "errorType": "duplicate_exchange_error",
+  "errorId": "dup_exch_1693123456789",
+  "errorMessage": "UNIQUE constraint failed: exchanges.owner_user_id",
+  "timestamp": "2025-08-29T12:00:00Z"
+}
+```
+
+**エラータイプ:**
+
+- `duplicate_exchange_error` - 重複交換エラー
+- `foreign_key_error` - 外部キー制約エラー
+- `database_schema_error` - データベーススキーマエラー
+- `parameter_binding_error` - パラメータバインディングエラー
+- `general_database_error` - 一般的なデータベースエラー
+- `unknown_error` - 不明なエラー
 
 ## 🔑 パスワードリセット機能（v1.4.0の新機能）
 

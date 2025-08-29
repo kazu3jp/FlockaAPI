@@ -425,10 +425,39 @@ exchanges.post('/qr/generate', authMiddleware, async (c) => {
     });
   } catch (error) {
     console.error('Generate QR token error:', error);
-    return c.json({
+    
+    // エラーの詳細情報を含める
+    const errorDetails: any = {
       success: false,
       error: 'Failed to generate QR token',
-    }, 500);
+      timestamp: new Date().toISOString(),
+    };
+
+    // エラータイプとIDを生成
+    if (error instanceof Error) {
+      errorDetails.errorMessage = error.message;
+      
+      // SQLエラーの場合
+      if (error.message.includes('UNIQUE constraint failed')) {
+        errorDetails.errorType = 'duplicate_token_error';
+        errorDetails.errorId = `dup_token_${Date.now()}`;
+      } else if (error.message.includes('FOREIGN KEY constraint failed')) {
+        errorDetails.errorType = 'foreign_key_error';
+        errorDetails.errorId = `fk_error_${Date.now()}`;
+      } else if (error.message.includes('no such table') || 
+                 error.message.includes('no such column')) {
+        errorDetails.errorType = 'database_schema_error';
+        errorDetails.errorId = `schema_error_${Date.now()}`;
+      } else {
+        errorDetails.errorType = 'general_database_error';
+        errorDetails.errorId = `db_error_${Date.now()}`;
+      }
+    } else {
+      errorDetails.errorType = 'unknown_error';
+      errorDetails.errorId = `unknown_error_${Date.now()}`;
+    }
+
+    return c.json(errorDetails, 500);
   }
 });
 
@@ -656,11 +685,45 @@ exchanges.post('/qr', authMiddleware, async (c) => {
     if (error instanceof Error) {
       console.error('Error stack:', error.stack);
     }
-    return c.json({
+    
+    // エラーの詳細情報を含める
+    const errorDetails: any = {
       success: false,
       error: 'Failed to complete QR exchange',
-      debug: error instanceof Error ? error.message : String(error)
-    }, 500);
+      timestamp: new Date().toISOString(),
+    };
+
+    // エラータイプとIDを生成
+    if (error instanceof Error) {
+      errorDetails.errorMessage = error.message;
+      errorDetails.debug = error.message;
+      
+      // SQLエラーの場合
+      if (error.message.includes('UNIQUE constraint failed')) {
+        errorDetails.errorType = 'duplicate_exchange_error';
+        errorDetails.errorId = `dup_exch_${Date.now()}`;
+      } else if (error.message.includes('FOREIGN KEY constraint failed')) {
+        errorDetails.errorType = 'foreign_key_error';
+        errorDetails.errorId = `fk_error_${Date.now()}`;
+      } else if (error.message.includes('no such table') || 
+                 error.message.includes('no such column')) {
+        errorDetails.errorType = 'database_schema_error';
+        errorDetails.errorId = `schema_error_${Date.now()}`;
+      } else if (error.message.includes('bind') || 
+                 error.message.includes('parameter')) {
+        errorDetails.errorType = 'parameter_binding_error';
+        errorDetails.errorId = `param_error_${Date.now()}`;
+      } else {
+        errorDetails.errorType = 'general_database_error';
+        errorDetails.errorId = `db_error_${Date.now()}`;
+      }
+    } else {
+      errorDetails.errorType = 'unknown_error';
+      errorDetails.errorId = `unknown_error_${Date.now()}`;
+      errorDetails.debug = String(error);
+    }
+
+    return c.json(errorDetails, 500);
   }
 });
 
@@ -747,10 +810,116 @@ exchanges.get('/qr-logs', authMiddleware, async (c) => {
     });
   } catch (error) {
     console.error('Get QR exchange logs error:', error);
-    return c.json({
+    
+    // エラーの詳細情報を含める
+    const errorDetails: any = {
       success: false,
       error: 'Failed to fetch QR exchange logs',
-    }, 500);
+      timestamp: new Date().toISOString(),
+    };
+
+    // 特定のエラータイプの場合、追加情報を含める
+    if (error instanceof Error) {
+      errorDetails.errorMessage = error.message;
+      
+      // SQLエラーの場合、テーブル関連のエラーかチェック
+      if (error.message.includes('no such table') || 
+          error.message.includes('no such column') ||
+          error.message.includes('FOREIGN KEY constraint failed')) {
+        errorDetails.errorType = 'database_schema_error';
+        errorDetails.errorId = `schema_error_${Date.now()}`;
+      } else if (error.message.includes('bind') || 
+                 error.message.includes('parameter')) {
+        errorDetails.errorType = 'parameter_binding_error';
+        errorDetails.errorId = `param_error_${Date.now()}`;
+      } else {
+        errorDetails.errorType = 'general_database_error';
+        errorDetails.errorId = `db_error_${Date.now()}`;
+      }
+    } else {
+      errorDetails.errorType = 'unknown_error';
+      errorDetails.errorId = `unknown_error_${Date.now()}`;
+    }
+
+    return c.json(errorDetails, 500);
+  }
+});
+
+/**
+ * DELETE /exchanges/qr/logs/:id
+ * QR交換ログを削除（要認証）
+ */
+exchanges.delete('/qr/logs/:id', authMiddleware, async (c) => {
+  try {
+    const currentUser = getCurrentUser(c);
+    const logId = c.req.param('id');
+
+    // QRログの存在確認と所有者確認
+    const existingLog = await c.env.DB.prepare(
+      'SELECT id, qr_owner_user_id, scanner_user_id FROM qr_exchange_logs WHERE id = ?'
+    ).bind(logId).first() as QRExchangeLog | null;
+
+    if (!existingLog) {
+      return c.json({
+        success: false,
+        error: 'QR exchange log not found',
+      }, 404);
+    }
+
+    // 所有者確認（QR作成者またはスキャンした人のみ削除可能）
+    if (existingLog.qr_owner_user_id !== currentUser.userId && 
+        existingLog.scanner_user_id !== currentUser.userId) {
+      return c.json({
+        success: false,
+        error: 'Not authorized to delete this QR exchange log',
+      }, 403);
+    }
+
+    // 削除処理
+    await c.env.DB.prepare(
+      'DELETE FROM qr_exchange_logs WHERE id = ?'
+    ).bind(logId).run();
+
+    return c.json({
+      success: true,
+      message: 'QR exchange log deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete QR exchange log error:', error);
+    
+    // エラーの詳細情報を含める
+    const errorDetails: any = {
+      success: false,
+      error: 'Failed to delete QR exchange log',
+      timestamp: new Date().toISOString(),
+    };
+
+    // 特定のエラータイプの場合、追加情報を含める
+    if (error instanceof Error) {
+      errorDetails.errorMessage = error.message;
+      
+      // SQLエラーの場合、外部キー制約エラーかチェック
+      if (error.message.includes('FOREIGN KEY constraint failed')) {
+        errorDetails.errorType = 'foreign_key_error';
+        errorDetails.errorId = `fk_error_${Date.now()}`;
+      } else if (error.message.includes('no such table') || 
+                 error.message.includes('no such column')) {
+        errorDetails.errorType = 'database_schema_error';
+        errorDetails.errorId = `schema_error_${Date.now()}`;
+      } else if (error.message.includes('bind') || 
+                 error.message.includes('parameter')) {
+        errorDetails.errorType = 'parameter_binding_error';
+        errorDetails.errorId = `param_error_${Date.now()}`;
+      } else {
+        errorDetails.errorType = 'general_database_error';
+        errorDetails.errorId = `db_error_${Date.now()}`;
+      }
+    } else {
+      errorDetails.errorType = 'unknown_error';
+      errorDetails.errorId = `unknown_error_${Date.now()}`;
+    }
+
+    return c.json(errorDetails, 500);
   }
 });
 
