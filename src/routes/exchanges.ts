@@ -202,7 +202,12 @@ exchanges.put('/:id', authMiddleware, async (c) => {
     const currentUser = getCurrentUser(c);
     const exchangeId = c.req.param('id');
     const body: UpdateExchangeRequest = await c.req.json();
-    const { memo, location_name, latitude, longitude } = body;
+
+    // デフォルト値を設定
+    const memo = body.memo ?? '';
+    const location_name = body.location_name ?? null;
+    const latitude = body.latitude ?? null;
+    const longitude = body.longitude ?? null;
 
     // 交換記録の存在確認と所有者確認
     const existingExchange = await c.env.DB.prepare(
@@ -242,9 +247,13 @@ exchanges.put('/:id', authMiddleware, async (c) => {
     });
   } catch (error) {
     console.error('Update exchange error:', error);
+
+    // error を明示的に型キャスト
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
     return c.json({
       success: false,
-      error: 'Failed to update exchange',
+      error: `Failed to update exchange: ${errorMessage}`,
     }, 500);
   }
 });
