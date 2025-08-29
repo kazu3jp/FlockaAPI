@@ -83,7 +83,7 @@
 - `GET /` - コレクション一覧取得
 - `POST /` - 手動カード追加
 - `GET /:id` - 交換詳細取得
-- `PUT /:id` - 交換記録更新
+- `PUT /:id` - **メモ・位置情報更新**（NEW!）
 - `DELETE /:id` - 交換記録削除
 
 ### 🌐 URL交換・公開
@@ -253,6 +253,92 @@ HTMLフォームが表示され、新しいパスワードを入力可能です�
 - **ワンタイム使用**: トークンは1回のみ使用可能
 - **メール認証**: 登録済みメールアドレスのみ受付
 - **自動削除**: 期限切れトークンの自動クリーンアップ
+
+## 📝 コレクションメモ管理機能（v1.4.0の新機能）
+
+### 1. コレクション詳細取得
+
+```bash
+GET /exchanges/:id
+```
+
+**レスポンス:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "exchange-id",
+    "card": {
+      "id": "card-id",
+      "card_name": "カード名",
+      "bio": "自己紹介",
+      "image_url": "https://...",
+      "links": [...],
+      "owner_name": "カード所有者名"
+    },
+    "memo": "現在のメモ",
+    "location": {
+      "name": "交換場所",
+      "latitude": 35.6762,
+      "longitude": 139.6503
+    },
+    "collected_at": "2025-08-29T12:00:00Z"
+  }
+}
+```
+
+### 2. メモ・位置情報更新
+
+```bash
+PUT /exchanges/:id
+```
+
+```json
+{
+  "memo": "更新されたメモ内容",
+  "location_name": "新しい場所名",
+  "latitude": 35.6762,
+  "longitude": 139.6503
+}
+```
+
+**レスポンス:**
+
+```json
+{
+  "success": true,
+  "message": "Exchange updated successfully",
+  "data": {
+    "exchangeId": "exchange-id",
+    "memo": "更新されたメモ内容",
+    "location_name": "新しい場所名",
+    "latitude": 35.6762,
+    "longitude": 139.6503
+  }
+}
+```
+
+### 3. コレクション削除
+
+```bash
+DELETE /exchanges/:id
+```
+
+**レスポンス:**
+
+```json
+{
+  "success": true,
+  "message": "Exchange deleted successfully"
+}
+```
+
+### 🎯 使用例
+
+- **イベント後のメモ追加**: 交換した相手との思い出を記録
+- **位置情報の修正**: より正確な場所情報に更新
+- **詳細情報の管理**: 交換コレクションの整理・分類
 
 ## 🆕 v1.3.0の主な変更点
 
