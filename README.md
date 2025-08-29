@@ -5,23 +5,27 @@
 ## 🌟 主な機能
 
 ### 📱 プロフィールカード作成・管理
+
 - **デザインの自由度**: オリジナル画像アップロード対応
 - **リッチな情報**: カード名、**80文字bio**、最大4つのSNS・ポートフォリオリンク
 - **複数カード管理**: 用途別（ゲーム・創作・ビジネス等）の複数カード作成・切り替え
 
 ### ⚡ QR即時交換システム（NEW!）
+
 - **瞬時の双方向交換**: QRコード読み取りと同時に交換完了
 - **リアルタイム通知**: 読み取られた側への即座の通知
 - **シンプルなフロー**: 複雑な承認プロセスを廃止
 - **交換履歴**: すべてのQR交換の詳細ログ
 
 ### 🔄 多彩な交換方法
+
 - **QRコード交換**: リアルタイム生成・読み取りで即座に相互交換
 - **URL共有**: AirDrop・SNS経由でのカード共有
 - **近距離交換**: BLE対応、アプリ内でのユーザー検出・リクエスト機能
 - **位置情報記録**: 交換場所の自動記録
 
 ### 📚 コレクション機能
+
 - 交換カードの整理・管理
 - イベント・場所・日付のメモ機能
 - 交換履歴の詳細記録
@@ -29,12 +33,14 @@
 ## 🛠️ 技術スタック
 
 ### インフラ（Cloudflare エコシステム）
+
 - **API**: Cloudflare Workers (Hono.js)
 - **データベース**: Cloudflare D1 (SQLite)
 - **ストレージ**: Cloudflare R2 (画像ファイル)
 - **メール**: MailChannels Email API
 
 ### 開発技術
+
 - **言語**: TypeScript
 - **フレームワーク**: Hono.js
 - **認証**: JWT + bcrypt
@@ -44,6 +50,7 @@
 ## 🚀 API エンドポイント
 
 ### 🔐 認証 (`/auth`)
+
 - `POST /register` - 新規ユーザー登録
 - `POST /login` - ログイン
 - `GET /verify` - メールアドレス確認
@@ -55,6 +62,7 @@
 - `GET /me` - 現在のユーザー情報
 
 ### 🎴 カード管理 (`/cards`) - **bio対応**
+
 - `POST /upload-url` - 画像アップロード用署名付きURL生成
 - `POST /upload-file` - 画像ファイル直接アップロード
 - `POST /` - 新規カード作成（**bio対応**）
@@ -65,11 +73,13 @@
 - `POST /:id/generate-exchange-url` - カード交換URL生成
 
 ### ⚡ QR即時交換 (`/exchanges`) - **完全リニューアル**
+
 - `POST /qr/generate` - QRコード生成
 - `POST /qr` - **QR即時交換実行**（NEW!）
 - `GET /qr-logs` - **QR交換履歴取得**（NEW!）
 
 ### 📚 コレクション管理 (`/exchanges`)
+
 - `GET /` - コレクション一覧取得
 - `POST /` - 手動カード追加
 - `GET /:id` - 交換詳細取得
@@ -77,15 +87,18 @@
 - `DELETE /:id` - 交換記録削除
 
 ### 🌐 URL交換・公開
+
 - `GET /cards/exchange` - URL経由カード取得
 - `GET /cards/public/:id` - 公開カード表示
 
 ## 🎯 QR即時交換フロー（v1.3.0の新機能）
 
 ### 1. QRコード生成
+
 ```bash
 POST /exchanges/qr/generate
 ```
+
 ```json
 {
   "cardId": "your-card-id"
@@ -93,6 +106,7 @@ POST /exchanges/qr/generate
 ```
 
 **レスポンス:**
+
 ```json
 {
   "success": true,
@@ -106,9 +120,11 @@ POST /exchanges/qr/generate
 ```
 
 ### 2. QR読み取り・即時交換
+
 ```bash
 POST /exchanges/qr
 ```
+
 ```json
 {
   "qrData": "QRコードの内容",
@@ -119,6 +135,7 @@ POST /exchanges/qr
 ```
 
 **レスポンス:**
+
 ```json
 {
   "success": true,
@@ -143,11 +160,13 @@ POST /exchanges/qr
 ```
 
 ### 3. 交換履歴確認
+
 ```bash
 GET /exchanges/qr-logs
 ```
 
 **レスポンス:**
+
 ```json
 {
   "success": true,
@@ -178,9 +197,11 @@ GET /exchanges/qr-logs
 ## 🔑 パスワードリセット機能（v1.4.0の新機能）
 
 ### 1. パスワードリセット申請
+
 ```bash
 POST /auth/forgot-password
 ```
+
 ```json
 {
   "email": "user@example.com"
@@ -188,6 +209,7 @@ POST /auth/forgot-password
 ```
 
 **レスポンス:**
+
 ```json
 {
   "success": true,
@@ -196,9 +218,11 @@ POST /auth/forgot-password
 ```
 
 ### 2. パスワードリセット実行
+
 ```bash
 POST /auth/reset-password
 ```
+
 ```json
 {
   "token": "reset-token-from-email",
@@ -207,6 +231,7 @@ POST /auth/reset-password
 ```
 
 **レスポンス:**
+
 ```json
 {
   "success": true,
@@ -215,6 +240,7 @@ POST /auth/reset-password
 ```
 
 ### 3. パスワードリセットフォーム（Webブラウザ対応）
+
 ```bash
 GET /auth/reset-password?token=reset-token
 ```
@@ -222,6 +248,7 @@ GET /auth/reset-password?token=reset-token
 HTMLフォームが表示され、新しいパスワードを入力可能です。
 
 ### 🔒 セキュリティ仕様
+
 - **トークン有効期限**: 1時間（3600秒）
 - **ワンタイム使用**: トークンは1回のみ使用可能
 - **メール認証**: 登録済みメールアドレスのみ受付
@@ -230,17 +257,20 @@ HTMLフォームが表示され、新しいパスワードを入力可能です�
 ## 🆕 v1.3.0の主な変更点
 
 ### ⚡ QR交換システムの革新
+
 - **通知システム廃止**: 複雑な承認プロセスを削除
 - **即時双方向交換**: 読み取りと同時に交換完了
 - **シンプルなUX**: ワンタップで交換完了
 - **リアルタイム履歴**: 即座に交換確認可能
 
 ### 📝 bio機能の追加
+
 - **80文字制限**: 簡潔で分かりやすい自己紹介
 - **全エンドポイント対応**: 作成・更新・表示すべてで利用可能
 - **バリデーション**: 文字数制限の自動チェック
 
 ### 🛠 技術的改善
+
 - **Durable Objects削除**: 依存関係の簡素化
 - **パフォーマンス向上**: レスポンス速度の改善
 - **エラーハンドリング強化**: より詳細なログ出力
@@ -249,6 +279,7 @@ HTMLフォームが表示され、新しいパスワードを入力可能です�
 ## 📊 データベーススキーマ
 
 ### 主要テーブル
+
 - `users` - ユーザー情報
 - `cards` - プロフィールカード（**bio列追加**）
 - `exchanges` - カード交換・コレクション記録
@@ -257,6 +288,7 @@ HTMLフォームが表示され、新しいパスワードを入力可能です�
 - `password_reset_tokens` - **パスワードリセットトークン**（新テーブル）
 
 ### 新規テーブル: qr_exchange_logs
+
 ```sql
 CREATE TABLE qr_exchange_logs (
     id TEXT PRIMARY KEY,
@@ -274,6 +306,7 @@ CREATE TABLE qr_exchange_logs (
 ```
 
 ### 新規テーブル: password_reset_tokens
+
 ```sql
 CREATE TABLE password_reset_tokens (
     id TEXT PRIMARY KEY,
@@ -289,7 +322,7 @@ CREATE TABLE password_reset_tokens (
 
 ## 🌐 デプロイ情報
 
-- **Production URL**: https://flocka-api.kazu3jp-purin.workers.dev
+- **Production URL**: <https://api.flocka.net>
 - **Environment**: Cloudflare Workers
 - **Version**: v1.4.0
 - **Database**: Cloudflare D1
@@ -333,7 +366,15 @@ npm run deploy
 - **入力バリデーション**: 全エンドポイントでの検証
 - **レート制限**: API悪用防止
 
-## 📄 ライセンス
+## � 開発者向け情報
+
+詳細な開発者向けガイドは [`docs/DEVELOPER_GUIDE.md`](./docs/DEVELOPER_GUIDE.md) をご参照ください。
+
+- カードリンク詳細取得の実装例
+- cURLテストコマンド
+- JavaScript/TypeScript実装例
+
+## �📄 ライセンス
 
 MIT License
 
@@ -343,4 +384,4 @@ Flocka Development Team
 
 ---
 
-**🎉 v1.3.0 - QR即時交換システムが利用可能になりました！**
+**🎉 v1.4.0 - パスワードリセット機能とQR即時交換システムが利用可能です！**
